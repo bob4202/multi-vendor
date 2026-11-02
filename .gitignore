@@ -1,0 +1,7 @@
+# Each app keeps its own .gitignore (backend/, frontend/); this covers the repo root.
+.DS_Store
+.env
+.env.local
+.idea/
+.vscode/
+
