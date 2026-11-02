@@ -117,7 +117,7 @@ func storefrontKey(ctx context.Context, pool *pgxpool.Pool, args []string) error
 	}
 
 	var branchID uuid.UUID
-	err := pool.QueryRow(ctx, `SELECT id FROM branches WHERE host = $1`, *host).Scan(&branchID)
+	err := pool.QueryRow(ctx, `SELECT id FROM branches WHERE host = $1 ORDER BY created_at LIMIT 1`, *host).Scan(&branchID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("no branch with host %q (run make seed first?)", *host)
 	}

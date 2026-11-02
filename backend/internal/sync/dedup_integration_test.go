@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"testing"
 
@@ -36,7 +35,7 @@ func TestCrossBranchProductDedup(t *testing.T) {
 	// branches an explicit product-ref allowlist covering every record they
 	// upsert below - a branch with no filter configured skips every product.
 	branchA, err := q.CreateBranch(ctx, db.CreateBranchParams{
-		Name: "Test Branch A", Host: "test-branch-a-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID,
+		Name: "Test Branch A", Host: "test-branch-a-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID, InventoryProvider: "fake",
 		AllowedSecondaryDepartmentUuids: []string{},
 		AllowedProductRefs:              []string{"a1", "a2"},
 	})
@@ -44,7 +43,7 @@ func TestCrossBranchProductDedup(t *testing.T) {
 		t.Fatalf("create branch A: %v", err)
 	}
 	branchB, err := q.CreateBranch(ctx, db.CreateBranchParams{
-		Name: "Test Branch B", Host: "test-branch-b-" + t.Name(), ApiUsername: "b", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID,
+		Name: "Test Branch B", Host: "test-branch-b-" + t.Name(), ApiUsername: "b", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID, InventoryProvider: "fake",
 		AllowedSecondaryDepartmentUuids: []string{},
 		AllowedProductRefs:              []string{"b1"},
 	})
@@ -56,19 +55,17 @@ func TestCrossBranchProductDedup(t *testing.T) {
 	rawB1 := []byte(`{"uuid":"b1","plu":"1001","name":"Chicken Breast 1kg","barcode":"5000112","product_code":"CB1","department_uuid":"dept-meat","price1":649,"cost_price":420,"can_be_sold":true,"deleted":false,"last_modified":"2026-01-01T11:00:00Z"}`)
 	rawA2NoPLU := []byte(`{"uuid":"a2","plu":null,"name":"Glasgow Special Pie","department_uuid":"dept-bakery","price1":250,"cost_price":150,"can_be_sold":true,"deleted":false,"last_modified":"2026-01-01T10:00:00Z"}`)
 
-	syncer := productSyncer{}
-
-	if _, _, err := syncer.Upsert(ctx, q, branchA, json.RawMessage(rawA1)); err != nil {
+	if _, _, err := upsertRawProduct(ctx, q, branchA, rawA1); err != nil {
 		t.Fatalf("upsert A1: %v", err)
 	}
-	if _, _, err := syncer.Upsert(ctx, q, branchB, json.RawMessage(rawB1)); err != nil {
+	if _, _, err := upsertRawProduct(ctx, q, branchB, rawB1); err != nil {
 		t.Fatalf("upsert B1: %v", err)
 	}
-	if _, _, err := syncer.Upsert(ctx, q, branchA, json.RawMessage(rawA2NoPLU)); err != nil {
+	if _, _, err := upsertRawProduct(ctx, q, branchA, rawA2NoPLU); err != nil {
 		t.Fatalf("upsert A2 (1st sync): %v", err)
 	}
 	// Simulate a re-sync of the same no-PLU record.
-	if _, _, err := syncer.Upsert(ctx, q, branchA, json.RawMessage(rawA2NoPLU)); err != nil {
+	if _, _, err := upsertRawProduct(ctx, q, branchA, rawA2NoPLU); err != nil {
 		t.Fatalf("upsert A2 (2nd sync): %v", err)
 	}
 

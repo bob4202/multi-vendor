@@ -17,8 +17,11 @@ import (
 
 	"ecommerce/backend/internal/crypto"
 	"ecommerce/backend/internal/db"
+	"ecommerce/backend/internal/inventory"
+	inventoryfake "ecommerce/backend/internal/inventory/fake"
 	"ecommerce/backend/internal/platform"
 	"ecommerce/backend/internal/portal"
+	syncpkg "ecommerce/backend/internal/sync"
 )
 
 // TestAdminOnboardingFlow drives the admin API the way the admin UI does:
@@ -52,8 +55,10 @@ func TestAdminOnboardingFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	engine := syncpkg.NewEngine(pool, box, inventory.Registry{inventoryfake.Name: inventoryfake.New}, logger)
 	srv := httptest.NewServer(NewRouter(Deps{
-		Queries: q, SecretBox: box, Portal: portal.NewService(pool), Platform: platformSvc,
+		Queries: q, SecretBox: box, Engine: engine, Portal: portal.NewService(pool), Platform: platformSvc,
 		AdminKey: adminKey, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))
 	defer srv.Close()

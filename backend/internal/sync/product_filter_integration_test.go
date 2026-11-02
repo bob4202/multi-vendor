@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"testing"
 
@@ -32,10 +31,9 @@ func TestProductSyncBranchFilter(t *testing.T) {
 
 	q := db.New(pool)
 	vendorID := testVendorID(t, ctx, q)
-	syncer := productSyncer{}
 
 	deptBranch, err := q.CreateBranch(ctx, db.CreateBranchParams{
-		Name: "Dept Filtered Branch", Host: "test-dept-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID,
+		Name: "Dept Filtered Branch", Host: "test-dept-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID, InventoryProvider: "fake",
 		AllowedSecondaryDepartmentUuids: []string{"dept-meat"},
 		AllowedProductRefs:              []string{},
 	})
@@ -44,7 +42,7 @@ func TestProductSyncBranchFilter(t *testing.T) {
 	}
 
 	refBranch, err := q.CreateBranch(ctx, db.CreateBranchParams{
-		Name: "Ref Filtered Branch", Host: "test-ref-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID,
+		Name: "Ref Filtered Branch", Host: "test-ref-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID, InventoryProvider: "fake",
 		AllowedSecondaryDepartmentUuids: []string{"dept-bakery"},
 		AllowedProductRefs:              []string{"c1"},
 	})
@@ -53,7 +51,7 @@ func TestProductSyncBranchFilter(t *testing.T) {
 	}
 
 	unfilteredBranch, err := q.CreateBranch(ctx, db.CreateBranchParams{
-		Name: "Unfiltered Branch", Host: "test-none-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID,
+		Name: "Unfiltered Branch", Host: "test-none-" + t.Name(), ApiUsername: "a", ApiKeyCipher: []byte("x"), IsActive: true, VendorID: vendorID, InventoryProvider: "fake",
 		AllowedSecondaryDepartmentUuids: []string{},
 		AllowedProductRefs:              []string{},
 	})
@@ -66,7 +64,7 @@ func TestProductSyncBranchFilter(t *testing.T) {
 	refMatchRaw := []byte(`{"uuid":"c1","plu":"2003","name":"Custom Cut","secondary_department_uuid":"dept-meat","price1":500,"deleted":false,"last_modified":"2026-01-02T12:00:00Z"}`)
 
 	// (a) matches the department allowlist -> written.
-	lm, written, err := syncer.Upsert(ctx, q, deptBranch, json.RawMessage(matchingRaw))
+	lm, written, err := upsertRawProduct(ctx, q, deptBranch, matchingRaw)
 	if err != nil {
 		t.Fatalf("upsert matching record: %v", err)
 	}
@@ -80,7 +78,7 @@ func TestProductSyncBranchFilter(t *testing.T) {
 
 	// (b) matches neither filter -> skipped, no error, cursor-relevant
 	// lastModified still returned.
-	lm, written, err = syncer.Upsert(ctx, q, deptBranch, json.RawMessage(nonMatchingRaw))
+	lm, written, err = upsertRawProduct(ctx, q, deptBranch, nonMatchingRaw)
 	if err != nil {
 		t.Fatalf("upsert non-matching record: %v", err)
 	}
@@ -94,7 +92,7 @@ func TestProductSyncBranchFilter(t *testing.T) {
 
 	// (c) outside the department allowlist but inside the product-ref
 	// allowlist -> written (OR semantics).
-	_, written, err = syncer.Upsert(ctx, q, refBranch, json.RawMessage(refMatchRaw))
+	_, written, err = upsertRawProduct(ctx, q, refBranch, refMatchRaw)
 	if err != nil {
 		t.Fatalf("upsert ref-matching record: %v", err)
 	}
@@ -104,14 +102,14 @@ func TestProductSyncBranchFilter(t *testing.T) {
 	assertBranchProductExists(t, pool, refBranch.ID, "c1", true)
 
 	// (d) branch with no filter configured -> nothing written.
-	_, written, err = syncer.Upsert(ctx, q, unfilteredBranch, json.RawMessage(matchingRaw))
+	_, written, err = upsertRawProduct(ctx, q, unfilteredBranch, matchingRaw)
 	if err != nil {
 		t.Fatalf("upsert on unfiltered branch: %v", err)
 	}
 	if written {
 		t.Errorf("expected a branch with no filter configured to skip every product")
 	}
-	if syncer.FilterConfigured(unfilteredBranch) {
+	if productFilterConfigured(unfilteredBranch) {
 		t.Errorf("expected FilterConfigured to be false for a branch with empty filters")
 	}
 	assertBranchProductExists(t, pool, unfilteredBranch.ID, "m1", false)

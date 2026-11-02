@@ -34,6 +34,7 @@ type Branch struct {
 	StorefrontApiKeyPrefix          *string            `json:"storefront_api_key_prefix"`
 	VendorID                        uuid.UUID          `json:"vendor_id"`
 	StorefrontUrl                   *string            `json:"storefront_url"`
+	InventoryProvider               string             `json:"inventory_provider"`
 }
 
 type BranchHoursException struct {

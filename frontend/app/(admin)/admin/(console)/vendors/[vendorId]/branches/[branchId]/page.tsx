@@ -30,9 +30,10 @@ type Props = { params: Promise<{ vendorId: string; branchId: string }> }
 
 export default async function AdminBranchPage({ params }: Props) {
   const { vendorId, branchId } = await params
-  const [branch, categories] = await Promise.all([
+  const [branch, categories, providers] = await Promise.all([
     adminAPI.getBranch(branchId),
     adminAPI.listCategories(),
+    adminAPI.listInventoryProviders(),
   ])
   // The branch must belong to the vendor in the URL.
   if (!branch || branch.vendor_id !== vendorId) notFound()
@@ -106,6 +107,7 @@ export default async function AdminBranchPage({ params }: Props) {
             vendorId={vendorId}
             branch={branch}
             categories={categories}
+            providers={providers}
           />
         </CardContent>
       </Card>

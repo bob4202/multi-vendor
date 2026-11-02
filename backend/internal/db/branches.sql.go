@@ -12,9 +12,9 @@ import (
 )
 
 const createBranch = `-- name: CreateBranch :one
-INSERT INTO branches (name, host, api_username, api_key_cipher, is_active, allowed_secondary_department_uuids, allowed_product_refs, vendor_id, storefront_url)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url
+INSERT INTO branches (name, host, api_username, api_key_cipher, is_active, allowed_secondary_department_uuids, allowed_product_refs, vendor_id, storefront_url, inventory_provider)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url, inventory_provider
 `
 
 type CreateBranchParams struct {
@@ -27,6 +27,7 @@ type CreateBranchParams struct {
 	AllowedProductRefs              []string  `json:"allowed_product_refs"`
 	VendorID                        uuid.UUID `json:"vendor_id"`
 	StorefrontUrl                   *string   `json:"storefront_url"`
+	InventoryProvider               string    `json:"inventory_provider"`
 }
 
 func (q *Queries) CreateBranch(ctx context.Context, arg CreateBranchParams) (Branch, error) {
@@ -40,6 +41,7 @@ func (q *Queries) CreateBranch(ctx context.Context, arg CreateBranchParams) (Bra
 		arg.AllowedProductRefs,
 		arg.VendorID,
 		arg.StorefrontUrl,
+		arg.InventoryProvider,
 	)
 	var i Branch
 	err := row.Scan(
@@ -57,12 +59,13 @@ func (q *Queries) CreateBranch(ctx context.Context, arg CreateBranchParams) (Bra
 		&i.StorefrontApiKeyPrefix,
 		&i.VendorID,
 		&i.StorefrontUrl,
+		&i.InventoryProvider,
 	)
 	return i, err
 }
 
 const getBranch = `-- name: GetBranch :one
-SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url FROM branches WHERE id = $1
+SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url, inventory_provider FROM branches WHERE id = $1
 `
 
 func (q *Queries) GetBranch(ctx context.Context, id uuid.UUID) (Branch, error) {
@@ -83,12 +86,13 @@ func (q *Queries) GetBranch(ctx context.Context, id uuid.UUID) (Branch, error) {
 		&i.StorefrontApiKeyPrefix,
 		&i.VendorID,
 		&i.StorefrontUrl,
+		&i.InventoryProvider,
 	)
 	return i, err
 }
 
 const getBranchByStorefrontKeyHash = `-- name: GetBranchByStorefrontKeyHash :one
-SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url FROM branches WHERE storefront_api_key_hash = $1 AND is_active = true
+SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url, inventory_provider FROM branches WHERE storefront_api_key_hash = $1 AND is_active = true
 `
 
 func (q *Queries) GetBranchByStorefrontKeyHash(ctx context.Context, storefrontApiKeyHash []byte) (Branch, error) {
@@ -109,12 +113,13 @@ func (q *Queries) GetBranchByStorefrontKeyHash(ctx context.Context, storefrontAp
 		&i.StorefrontApiKeyPrefix,
 		&i.VendorID,
 		&i.StorefrontUrl,
+		&i.InventoryProvider,
 	)
 	return i, err
 }
 
 const listActiveBranches = `-- name: ListActiveBranches :many
-SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url FROM branches WHERE is_active = true ORDER BY name
+SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url, inventory_provider FROM branches WHERE is_active = true ORDER BY name
 `
 
 func (q *Queries) ListActiveBranches(ctx context.Context) ([]Branch, error) {
@@ -141,6 +146,7 @@ func (q *Queries) ListActiveBranches(ctx context.Context) ([]Branch, error) {
 			&i.StorefrontApiKeyPrefix,
 			&i.VendorID,
 			&i.StorefrontUrl,
+			&i.InventoryProvider,
 		); err != nil {
 			return nil, err
 		}
@@ -153,7 +159,7 @@ func (q *Queries) ListActiveBranches(ctx context.Context) ([]Branch, error) {
 }
 
 const listBranches = `-- name: ListBranches :many
-SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url FROM branches ORDER BY name
+SELECT id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url, inventory_provider FROM branches ORDER BY name
 `
 
 func (q *Queries) ListBranches(ctx context.Context) ([]Branch, error) {
@@ -180,6 +186,7 @@ func (q *Queries) ListBranches(ctx context.Context) ([]Branch, error) {
 			&i.StorefrontApiKeyPrefix,
 			&i.VendorID,
 			&i.StorefrontUrl,
+			&i.InventoryProvider,
 		); err != nil {
 			return nil, err
 		}
@@ -218,7 +225,7 @@ func (q *Queries) SetBranchActive(ctx context.Context, arg SetBranchActiveParams
 const setBranchStorefrontKey = `-- name: SetBranchStorefrontKey :one
 UPDATE branches SET storefront_api_key_hash = $2, storefront_api_key_prefix = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url
+RETURNING id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url, inventory_provider
 `
 
 type SetBranchStorefrontKeyParams struct {
@@ -245,6 +252,7 @@ func (q *Queries) SetBranchStorefrontKey(ctx context.Context, arg SetBranchStore
 		&i.StorefrontApiKeyPrefix,
 		&i.VendorID,
 		&i.StorefrontUrl,
+		&i.InventoryProvider,
 	)
 	return i, err
 }
@@ -260,9 +268,10 @@ SET name = $2,
     allowed_product_refs = $8,
     vendor_id = $9,
     storefront_url = $10,
+    inventory_provider = $11,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url
+RETURNING id, name, host, api_username, api_key_cipher, is_active, created_at, updated_at, allowed_secondary_department_uuids, allowed_product_refs, storefront_api_key_hash, storefront_api_key_prefix, vendor_id, storefront_url, inventory_provider
 `
 
 type UpdateBranchParams struct {
@@ -276,6 +285,7 @@ type UpdateBranchParams struct {
 	AllowedProductRefs              []string  `json:"allowed_product_refs"`
 	VendorID                        uuid.UUID `json:"vendor_id"`
 	StorefrontUrl                   *string   `json:"storefront_url"`
+	InventoryProvider               string    `json:"inventory_provider"`
 }
 
 func (q *Queries) UpdateBranch(ctx context.Context, arg UpdateBranchParams) (Branch, error) {
@@ -290,6 +300,7 @@ func (q *Queries) UpdateBranch(ctx context.Context, arg UpdateBranchParams) (Bra
 		arg.AllowedProductRefs,
 		arg.VendorID,
 		arg.StorefrontUrl,
+		arg.InventoryProvider,
 	)
 	var i Branch
 	err := row.Scan(
@@ -307,6 +318,7 @@ func (q *Queries) UpdateBranch(ctx context.Context, arg UpdateBranchParams) (Bra
 		&i.StorefrontApiKeyPrefix,
 		&i.VendorID,
 		&i.StorefrontUrl,
+		&i.InventoryProvider,
 	)
 	return i, err
 }

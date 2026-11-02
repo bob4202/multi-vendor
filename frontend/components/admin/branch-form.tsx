@@ -17,10 +17,28 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { saveBranchAction } from "@/lib/admin/actions"
 import type { AdminBranch } from "@/types/admin"
 import type { Category } from "@/types/category"
+
+// Display names for the inventory providers the API knows about; anything
+// newer falls back to its raw name.
+const PROVIDER_LABELS: Record<string, string> = {
+  connect: "Connect API",
+  fake: "Demo data (no real system)",
+}
+
+function providerLabel(name: string) {
+  return PROVIDER_LABELS[name] ?? name
+}
 
 // A branch's inventory system connection: where its products sync from, and
 // which product departments to put online. Create when `branch` is absent,
@@ -30,16 +48,26 @@ function BranchForm({
   vendorId,
   branch,
   categories,
+  providers,
   onSaved,
   submitLabel = "Save branch",
 }: {
   vendorId: string
   branch?: AdminBranch
   categories: Category[]
+  providers: string[] // inventory systems enabled on this server
   onSaved?: (branch: AdminBranch) => void
   submitLabel?: string
 }) {
   const [name, setName] = useState(branch?.name ?? "")
+  const [provider, setProvider] = useState(
+    branch?.inventory_provider ?? providers[0] ?? ""
+  )
+  // Keep a branch's current system selectable even if this server no
+  // longer offers it, so opening the form doesn't silently change it.
+  const providerItems = [
+    ...new Set([...providers, ...(branch ? [branch.inventory_provider] : [])]),
+  ].map((p) => ({ value: p, label: providerLabel(p) }))
   const [host, setHost] = useState(branch?.host ?? "")
   const [username, setUsername] = useState(branch?.api_username ?? "")
   const [apiKey, setApiKey] = useState("")
@@ -66,6 +94,7 @@ function BranchForm({
     startTransition(async () => {
       const res = await saveBranchAction(vendorId, branch?.id ?? null, {
         name: name.trim(),
+        inventory_provider: provider || undefined,
         host: host.trim(),
         api_username: username.trim(),
         api_key: apiKey.trim(),
@@ -118,6 +147,40 @@ function BranchForm({
             required: true,
             placeholder: "e.g. Grocery Leeds",
           })}
+          <Field
+            data-invalid={!!errors.inventory_provider || undefined}
+            className="sm:col-span-2"
+          >
+            <FieldLabel htmlFor="branch-inventory_provider">
+              Inventory system
+            </FieldLabel>
+            <Select
+              items={providerItems}
+              value={provider}
+              onValueChange={(v) => v && setProvider(v)}
+            >
+              <SelectTrigger
+                id="branch-inventory_provider"
+                className="w-full"
+                aria-invalid={!!errors.inventory_provider || undefined}
+              >
+                <SelectValue placeholder="No inventory system enabled" />
+              </SelectTrigger>
+              <SelectContent>
+                {providerItems.map((p) => (
+                  <SelectItem key={p.value} value={p.value}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldDescription>
+              Where this branch&apos;s products and prices come from.
+            </FieldDescription>
+            {errors.inventory_provider && (
+              <FieldError>{errors.inventory_provider}</FieldError>
+            )}
+          </Field>
           {field(
             "host",
             "Inventory system host",
@@ -130,16 +193,10 @@ function BranchForm({
             },
             "The branch's host name in the inventory system."
           )}
-          {field(
-            "api_username",
-            "API username",
-            username,
-            setUsername,
-            {
-              required: true,
-              autoComplete: "off",
-            }
-          )}
+          {field("api_username", "API username", username, setUsername, {
+            required: true,
+            autoComplete: "off",
+          })}
           {field(
             "api_key",
             "API key",

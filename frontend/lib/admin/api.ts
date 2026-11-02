@@ -90,6 +90,10 @@ export const adminAPI = {
       method: "POST",
     }),
 
+  // Inventory systems branches can sync from on this server.
+  listInventoryProviders: async () =>
+    (await request<{ providers: string[] }>("/inventory-providers")).providers,
+
   getBranch: (branchId: string) =>
     orNull(request<AdminBranch>(`/branches/${id(branchId)}`)),
 

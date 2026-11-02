@@ -1,6 +1,6 @@
 -- name: CreateBranch :one
-INSERT INTO branches (name, host, api_username, api_key_cipher, is_active, allowed_secondary_department_uuids, allowed_product_refs, vendor_id, storefront_url)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO branches (name, host, api_username, api_key_cipher, is_active, allowed_secondary_department_uuids, allowed_product_refs, vendor_id, storefront_url, inventory_provider)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: UpdateBranch :one
@@ -14,6 +14,7 @@ SET name = $2,
     allowed_product_refs = $8,
     vendor_id = $9,
     storefront_url = $10,
+    inventory_provider = $11,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

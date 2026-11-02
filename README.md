@@ -41,7 +41,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 
 **Emails** go to Mailpit locally: http://localhost:8025.
 
-**Inventory sync** needs `INVENTORY_API_URL` in `backend/.env` (the API's base URL, with `{host}` for each branch); sync is off without it.
+**Inventory sync** works through providers, like payments: each branch picks its inventory system in the admin side, and `INVENTORY_PROVIDERS` in `backend/.env` decides which ones the server offers. Demo branches use `fake` (no records, so "Sync now" works without a real system). `connect` also needs `INVENTORY_CONNECT_URL`, the API's base URL with `{host}` for each branch. A new system is one new package in `backend/internal/inventory/`.
 
 **Card payments** use the `fake` provider locally (`PAYMENT_PROVIDERS=fake` in `backend/.env`), with its own Pay / Decline page.
 
@@ -67,7 +67,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 
 ## How it fits together
 
-- Each branch's products sync on a schedule from its inventory system into `products` (shared catalogue) and `branch_products` (per-branch price and availability). Nothing is ever written back.
+- Each branch's products sync on a schedule from its inventory system (through an `inventory.Provider`) into `products` (shared catalogue) and `branch_products` (per-branch price and availability). Nothing is ever written back.
 - Each storefront deployment is one branch, set by `BRANCH_ID` and `STOREFRONT_KEY`. Only the Next server calls the API, so keys and session tokens never reach the browser.
 - Orders wait for the shop to accept them (`ORDER_ACCEPT_TIMEOUT_MINUTES`, default 5), then move through picking and ready to completed. Background jobs handle timeouts, unpaid orders, substitutions and no-shows.
 - Emails and push notifications go out from a `notification_outbox` table; payment capture, void and refund calls go through a `payment_jobs` queue.

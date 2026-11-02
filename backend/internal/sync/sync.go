@@ -1,18 +1,15 @@
 // Package sync pulls Product and Customer records from each active branch's
-// external inventory system (GET only) and upserts them into our database.
-// The HTTP client lives in internal/inventory.
-// Nothing here ever writes back to the inventory system — order management happens
-// entirely on our side.
+// external inventory system and upserts them into our database. Each branch
+// names its system in branches.inventory_provider; the provider (see
+// internal/inventory) turns that system's data into our shape, so nothing
+// here knows any one system's API. Nothing is ever written back.
 package sync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,149 +21,173 @@ import (
 	"ecommerce/backend/internal/inventory"
 )
 
-// resourceSyncer knows how to pull and persist one inventory resource.
-type resourceSyncer interface {
-	// Resource is the API path segment, e.g. "product".
-	Resource() string
-	// CursorParam is the query parameter used for incremental sync
-	// (the inventory API names this differently per resource).
-	CursorParam() string
-	// PageLimit is the max page size this resource's docs allow.
-	PageLimit() int
-	// ExtraParams returns additional static query params to include on
-	// every page request for this branch (e.g. a server-side filter
-	// optimization). Returns nil when none apply.
-	ExtraParams(branch db.Branch) url.Values
-	// Upsert persists one raw record and returns its source last_modified
-	// timestamp (used to advance the sync cursor even when the record
-	// wasn't written) and whether a DB write actually happened.
-	Upsert(ctx context.Context, q *db.Queries, branch db.Branch, raw json.RawMessage) (lastModified time.Time, written bool, err error)
-}
-
-// filterConfiguredChecker is implemented by resourceSyncers whose sync is
-// gated by a per-branch inclusion filter (currently just products). When a
-// branch has no filter configured, Engine skips calling the vendor API for
-// that resource entirely rather than fetching everything and discarding it.
-type filterConfiguredChecker interface {
-	FilterConfigured(branch db.Branch) bool
-}
+const (
+	resourceProduct  = "product"
+	resourceCustomer = "customer"
+)
 
 type Engine struct {
-	pool       *pgxpool.Pool
-	queries    *db.Queries
-	secretBox  *crypto.SecretBox
-	apiURL     string // INVENTORY_API_URL, with a {host} placeholder
-	httpClient *http.Client
-	syncers    []resourceSyncer
-	logger     *slog.Logger
+	pool      *pgxpool.Pool
+	queries   *db.Queries
+	secretBox *crypto.SecretBox
+	providers inventory.Registry
+	logger    *slog.Logger
 }
 
-func NewEngine(pool *pgxpool.Pool, secretBox *crypto.SecretBox, apiURL string, logger *slog.Logger) *Engine {
+func NewEngine(pool *pgxpool.Pool, secretBox *crypto.SecretBox, providers inventory.Registry, logger *slog.Logger) *Engine {
 	return &Engine{
-		pool:       pool,
-		queries:    db.New(pool),
-		secretBox:  secretBox,
-		apiURL:     apiURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		syncers:    []resourceSyncer{productSyncer{}, customerSyncer{}},
-		logger:     logger,
+		pool:      pool,
+		queries:   db.New(pool),
+		secretBox: secretBox,
+		providers: providers,
+		logger:    logger,
 	}
 }
 
-// SyncBranch runs every resource syncer for one branch. A failure on one
-// resource does not block the others.
+// ProviderNames lists the inventory providers this server can sync from.
+func (e *Engine) ProviderNames() []string { return e.providers.Names() }
+
+// HasProvider reports whether a branch may use this provider here.
+func (e *Engine) HasProvider(name string) bool { return e.providers.Has(name) }
+
+// SyncBranch syncs products, then customers, for one branch. A failure on
+// one resource doesn't block the other.
 func (e *Engine) SyncBranch(ctx context.Context, branch db.Branch) error {
-	if e.apiURL == "" {
-		return errors.New("INVENTORY_API_URL is not set")
-	}
 	apiKey, err := e.secretBox.Decrypt(branch.ApiKeyCipher)
 	if err != nil {
 		return fmt.Errorf("decrypt api key for branch %s: %w", branch.ID, err)
 	}
-
-	client := inventory.NewClient(e.apiURL, inventory.Credentials{
+	provider, err := e.providers.Build(branch.InventoryProvider, inventory.Credentials{
 		Host:     branch.Host,
 		Username: branch.ApiUsername,
 		APIKey:   apiKey,
-	}, e.httpClient)
+	})
+	if err != nil {
+		return fmt.Errorf("inventory provider for branch %s: %w", branch.ID, err)
+	}
 
 	var firstErr error
-	for _, syncer := range e.syncers {
-		if err := e.syncResource(ctx, client, branch, syncer); err != nil {
+	for _, run := range []struct {
+		resource string
+		sync     func(context.Context, inventory.Provider, db.Branch) error
+	}{
+		{resourceProduct, e.syncProducts},
+		{resourceCustomer, e.syncCustomers},
+	} {
+		if err := run.sync(ctx, provider, branch); err != nil {
 			e.logger.Error("resource sync failed",
-				"branch_id", branch.ID, "branch", branch.Name,
-				"resource", syncer.Resource(), "error", err)
+				"branch_id", branch.ID, "branch", branch.Name, "resource", run.resource, "error", err)
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
 		e.logger.Info("resource sync succeeded",
-			"branch_id", branch.ID, "branch", branch.Name, "resource", syncer.Resource())
+			"branch_id", branch.ID, "branch", branch.Name, "resource", run.resource)
 	}
 	return firstErr
 }
 
-func (e *Engine) syncResource(ctx context.Context, client *inventory.Client, branch db.Branch, syncer resourceSyncer) error {
-	state, err := e.queries.GetSyncState(ctx, db.GetSyncStateParams{BranchID: branch.ID, Resource: syncer.Resource()})
+func (e *Engine) syncProducts(ctx context.Context, p inventory.Provider, branch db.Branch) error {
+	// A branch with no filter wants no products: there's no unfiltered
+	// "whole catalogue" mode, so don't even ask the system.
+	if !productFilterConfigured(branch) {
+		e.logger.Warn("branch has no product filter configured; skipping product sync",
+			"branch_id", branch.ID, "branch", branch.Name)
+		return e.recordSkipped(ctx, branch, resourceProduct)
+	}
+
+	return e.syncResource(ctx, branch, resourceProduct, func(ctx context.Context, since time.Time, save saveFunc) error {
+		q := inventory.ProductQuery{Since: since, Department: departmentHint(branch)}
+		return p.Products(ctx, q, func(ctx context.Context, products []inventory.Product) error {
+			return save(ctx, func(ctx context.Context, q *db.Queries) (time.Time, int, error) {
+				var maxSeen time.Time
+				written := 0
+				for _, pr := range products {
+					lm, ok, err := upsertProduct(ctx, q, branch, pr)
+					if err != nil {
+						return time.Time{}, 0, err
+					}
+					if lm.After(maxSeen) {
+						maxSeen = lm
+					}
+					if ok {
+						written++
+					}
+				}
+				return maxSeen, written, nil
+			})
+		})
+	})
+}
+
+func (e *Engine) syncCustomers(ctx context.Context, p inventory.Provider, branch db.Branch) error {
+	return e.syncResource(ctx, branch, resourceCustomer, func(ctx context.Context, since time.Time, save saveFunc) error {
+		return p.Customers(ctx, since, func(ctx context.Context, customers []inventory.Customer) error {
+			return save(ctx, func(ctx context.Context, q *db.Queries) (time.Time, int, error) {
+				var maxSeen time.Time
+				for _, c := range customers {
+					if err := upsertCustomer(ctx, q, branch, c); err != nil {
+						return time.Time{}, 0, err
+					}
+					if c.LastModified.After(maxSeen) {
+						maxSeen = c.LastModified
+					}
+				}
+				return maxSeen, len(customers), nil
+			})
+		})
+	})
+}
+
+// pageWriter writes one page of records and returns the newest change time
+// it saw and how many rows it wrote.
+type pageWriter func(ctx context.Context, q *db.Queries) (maxSeen time.Time, written int, err error)
+
+// saveFunc runs a pageWriter in its own transaction.
+type saveFunc func(ctx context.Context, write pageWriter) error
+
+// syncResource loads the resource's cursor, lets pull fetch everything
+// changed since then (saving each page in its own transaction), and records
+// the outcome. The cursor only moves forward after a fully successful run.
+func (e *Engine) syncResource(ctx context.Context, branch db.Branch, resource string, pull func(ctx context.Context, since time.Time, save saveFunc) error) error {
+	state, err := e.queries.GetSyncState(ctx, db.GetSyncStateParams{BranchID: branch.ID, Resource: resource})
 	if err != nil && !isNoRows(err) {
 		return fmt.Errorf("load sync state: %w", err)
 	}
 
-	if checker, ok := syncer.(filterConfiguredChecker); ok && !checker.FilterConfigured(branch) {
-		e.logger.Warn("branch has no filter configured for resource; skipping sync entirely",
-			"branch_id", branch.ID, "branch", branch.Name, "resource", syncer.Resource())
-		zero := int32(0)
-		return e.queries.RecordSyncSuccess(ctx, db.RecordSyncSuccessParams{
-			BranchID:       branch.ID,
-			Resource:       syncer.Resource(),
-			Cursor:         state.Cursor,
-			LastRunRecords: &zero,
-		})
-	}
-
-	params := url.Values{}
 	var cursor time.Time
 	if state.Cursor.Valid {
 		cursor = state.Cursor.Time
-		params.Set(syncer.CursorParam(), cursor.UTC().Format(time.RFC3339))
 	}
-	for k, vs := range syncer.ExtraParams(branch) {
-		for _, v := range vs {
-			params.Add(k, v)
-		}
-	}
-
 	maxSeen := cursor
 	total := 0
 
-	err = client.ForEachPage(ctx, syncer.Resource(), params, func(ctx context.Context, records []json.RawMessage) error {
+	save := func(ctx context.Context, write pageWriter) error {
 		tx, err := e.pool.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback(ctx)
 
-		q := e.queries.WithTx(tx)
-		for _, rec := range records {
-			lastModified, written, err := syncer.Upsert(ctx, q, branch, rec)
-			if err != nil {
-				return fmt.Errorf("upsert record: %w", err)
-			}
-			if lastModified.After(maxSeen) {
-				maxSeen = lastModified
-			}
-			if written {
-				total++
-			}
+		seen, written, err := write(ctx, e.queries.WithTx(tx))
+		if err != nil {
+			return err
 		}
-		return tx.Commit(ctx)
-	})
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		if seen.After(maxSeen) {
+			maxSeen = seen
+		}
+		total += written
+		return nil
+	}
 
-	if err != nil {
+	if err := pull(ctx, cursor, save); err != nil {
 		recErr := e.queries.RecordSyncFailure(ctx, db.RecordSyncFailureParams{
 			BranchID:     branch.ID,
-			Resource:     syncer.Resource(),
+			Resource:     resource,
 			LastRunError: strPtr(err.Error()),
 		})
 		if recErr != nil {
@@ -179,21 +200,58 @@ func (e *Engine) syncResource(ctx context.Context, client *inventory.Client, bra
 	if !maxSeen.IsZero() {
 		_ = cursorParam.Scan(maxSeen)
 	}
-	records32 := int32(total)
+	records := int32(total)
 	if err := e.queries.RecordSyncSuccess(ctx, db.RecordSyncSuccessParams{
 		BranchID:       branch.ID,
-		Resource:       syncer.Resource(),
+		Resource:       resource,
 		Cursor:         cursorParam,
-		LastRunRecords: &records32,
+		LastRunRecords: &records,
 	}); err != nil {
 		return fmt.Errorf("record sync success: %w", err)
 	}
-
 	return nil
+}
+
+// recordSkipped marks a resource as run with nothing to do, keeping its cursor.
+func (e *Engine) recordSkipped(ctx context.Context, branch db.Branch, resource string) error {
+	state, err := e.queries.GetSyncState(ctx, db.GetSyncStateParams{BranchID: branch.ID, Resource: resource})
+	if err != nil && !isNoRows(err) {
+		return fmt.Errorf("load sync state: %w", err)
+	}
+	zero := int32(0)
+	return e.queries.RecordSyncSuccess(ctx, db.RecordSyncSuccessParams{
+		BranchID:       branch.ID,
+		Resource:       resource,
+		Cursor:         state.Cursor,
+		LastRunRecords: &zero,
+	})
 }
 
 func strPtr(s string) *string { return &s }
 
 func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
+}
+
+// timestamptz turns a zero time into NULL.
+func timestamptz(t time.Time) pgtype.Timestamptz {
+	if t.IsZero() {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: t, Valid: true}
+}
+
+// rawOrEmpty stores "{}" when a provider has no original record to keep.
+func rawOrEmpty(raw []byte) []byte {
+	if len(raw) == 0 {
+		return []byte("{}")
+	}
+	return raw
+}
+
+func timeOrZero(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }

@@ -50,7 +50,7 @@ func TestVendorPortalTenancy(t *testing.T) {
 	newBranch := func(vendorID uuid.UUID, name string) db.Branch {
 		b, err := q.CreateBranch(ctx, db.CreateBranchParams{
 			Name: name, Host: name + "-" + suffix, ApiUsername: "u", ApiKeyCipher: []byte("x"),
-			IsActive: true, AllowedSecondaryDepartmentUuids: []string{}, AllowedProductRefs: []string{}, VendorID: vendorID,
+			IsActive: true, AllowedSecondaryDepartmentUuids: []string{}, AllowedProductRefs: []string{}, VendorID: vendorID, InventoryProvider: "fake",
 		})
 		if err != nil {
 			t.Fatalf("create branch %s: %v", name, err)

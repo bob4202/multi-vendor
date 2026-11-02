@@ -16,11 +16,13 @@ function BranchStep({
   vendorId,
   branch,
   categories,
+  providers,
   setupPath,
 }: {
   vendorId: string
   branch?: AdminBranch
   categories: Category[]
+  providers: string[]
   setupPath: string // the setup page; the saved branch is added as ?branch=
 }) {
   const router = useRouter()
@@ -29,6 +31,7 @@ function BranchStep({
       vendorId={vendorId}
       branch={branch}
       categories={categories}
+      providers={providers}
       submitLabel="Save and continue"
       onSaved={(saved) => router.push(`${setupPath}?branch=${saved.id}`)}
     />

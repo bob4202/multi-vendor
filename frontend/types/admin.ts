@@ -96,6 +96,7 @@ export interface AdminVendorDetail extends AdminVendor {
 export interface AdminBranch {
   id: string
   name: string
+  inventory_provider: string // which inventory system it syncs from
   host: string
   api_username: string
   is_active: boolean
@@ -108,6 +109,7 @@ export interface AdminBranch {
 
 export interface BranchInput {
   name: string
+  inventory_provider?: string // omitted on create = the server's default
   host: string
   api_username: string
   api_key?: string // required on create; omit on update to keep the current one

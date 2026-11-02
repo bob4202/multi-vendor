@@ -323,23 +323,33 @@ func main() {
 	}
 }
 
+// Demo branches sync from the "fake" inventory provider, which has no
+// records: "Sync now" works locally without a real inventory system, and the
+// seeded products stay as they are.
 func upsertBranch(ctx context.Context, pool *pgxpool.Pool, b seedBranch, vendorID uuid.UUID, deptUUIDs []string) (uuid.UUID, error) {
+	box, err := crypto.NewSecretBox(os.Getenv("APP_ENCRYPTION_KEY"))
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("APP_ENCRYPTION_KEY: %w", err)
+	}
+	cipher, err := box.Encrypt("demo-inventory-key")
+	if err != nil {
+		return uuid.Nil, err
+	}
+
 	var id uuid.UUID
-	err := pool.QueryRow(ctx, `
-		INSERT INTO branches (name, host, api_username, api_key_cipher, is_active, allowed_secondary_department_uuids, allowed_product_refs, vendor_id, storefront_url)
-		VALUES ($1, $2, $3, $4, true, $5, '{}', $6, 'http://localhost:3000')
-		ON CONFLICT (host) DO UPDATE SET
+	err = pool.QueryRow(ctx, `
+		INSERT INTO branches (name, inventory_provider, host, api_username, api_key_cipher, is_active, allowed_secondary_department_uuids, allowed_product_refs, vendor_id, storefront_url)
+		VALUES ($1, 'fake', $2, $3, $4, true, $5, '{}', $6, 'http://localhost:3000')
+		ON CONFLICT (inventory_provider, host) DO UPDATE SET
 			name = EXCLUDED.name,
+			api_key_cipher = EXCLUDED.api_key_cipher,
 			allowed_secondary_department_uuids = EXCLUDED.allowed_secondary_department_uuids,
 			vendor_id = EXCLUDED.vendor_id,
 			-- Links in local emails go to the dev storefront.
 			storefront_url = coalesce(branches.storefront_url, EXCLUDED.storefront_url),
 			updated_at = now()
 		RETURNING id`,
-		b.name, b.host, "seed-user",
-		// Not a real AES-GCM ciphertext - these demo branches have fake
-		// hosts and are never expected to actually sync against an inventory system.
-		[]byte("seed-placeholder-not-a-real-cipher"),
+		b.name, b.host, "seed-user", cipher,
 		deptUUIDs,
 		vendorID,
 	).Scan(&id)

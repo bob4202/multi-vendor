@@ -15,11 +15,15 @@ type Config struct {
 	HTTPAddr      string
 	AdminAPIKey   string
 	EncryptionKey string // base64, 32 bytes decoded - used to encrypt branch API keys at rest
-	// InventoryAPIURL is the inventory system's API base URL, with {host}
-	// standing in for each branch's host. Sync is off while it's empty.
-	InventoryAPIURL string
-	SyncInterval    time.Duration
-	SyncConcurrency int
+	// InventoryProviders are the inventory systems branches may sync from
+	// (INVENTORY_PROVIDERS, comma-separated, e.g. "connect"). Each branch
+	// picks one in the admin side. "fake" is for local development only.
+	InventoryProviders []string
+	// InventoryConnectURL is the connect provider's API base URL, with {host}
+	// standing in for each branch's host (INVENTORY_CONNECT_URL).
+	InventoryConnectURL string
+	SyncInterval        time.Duration
+	SyncConcurrency     int
 	// OrderAcceptTimeout is how long a shop has to accept a new order before
 	// it's cancelled automatically.
 	OrderAcceptTimeout time.Duration
@@ -61,20 +65,21 @@ type SMTPConfig struct {
 
 func Load() (Config, error) {
 	cfg := Config{
-		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		HTTPAddr:        getEnvDefault("HTTP_ADDR", ":8080"),
-		AdminAPIKey:     os.Getenv("ADMIN_API_KEY"),
-		EncryptionKey:   os.Getenv("APP_ENCRYPTION_KEY"),
-		InventoryAPIURL: os.Getenv("INVENTORY_API_URL"),
-		SyncInterval:    15 * time.Minute,
-		SyncConcurrency: 3,
+		DatabaseURL:         os.Getenv("DATABASE_URL"),
+		HTTPAddr:            getEnvDefault("HTTP_ADDR", ":8080"),
+		AdminAPIKey:         os.Getenv("ADMIN_API_KEY"),
+		EncryptionKey:       os.Getenv("APP_ENCRYPTION_KEY"),
+		InventoryProviders:  parseProviderList(os.Getenv("INVENTORY_PROVIDERS")),
+		InventoryConnectURL: os.Getenv("INVENTORY_CONNECT_URL"),
+		SyncInterval:        15 * time.Minute,
+		SyncConcurrency:     3,
 
 		OrderAcceptTimeout:  5 * time.Minute,
 		SubstitutionTimeout: 10 * time.Minute,
 		CollectionWindow:    60 * time.Minute,
 		CollectionGrace:     6 * time.Minute,
 		PaymentWindow:       30 * time.Minute,
-		PaymentProviders:    parsePaymentProviders(os.Getenv("PAYMENT_PROVIDERS")),
+		PaymentProviders:    parseProviderList(os.Getenv("PAYMENT_PROVIDERS")),
 
 		SMTP: SMTPConfig{
 			Host:     os.Getenv("SMTP_HOST"),
@@ -161,7 +166,8 @@ func Load() (Config, error) {
 // parsePaymentProviders turns "fake, Stripe," into ["fake", "stripe"]:
 // trimmed, lowercased, without empties or duplicates. Whether a name is a
 // provider we actually have is checked where the registry is built.
-func parsePaymentProviders(s string) []string {
+// parseProviderList reads a comma-separated list of provider names.
+func parseProviderList(s string) []string {
 	var names []string
 	for _, name := range strings.Split(s, ",") {
 		name = strings.ToLower(strings.TrimSpace(name))

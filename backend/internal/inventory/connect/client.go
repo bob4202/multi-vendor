@@ -1,8 +1,8 @@
-// Package inventory is a read-only (GET) client for a branch's external
-// inventory system, used to pull Product and Customer records for a single
-// branch into our own database. The API address comes from configuration
-// (INVENTORY_API_URL), never from code.
-package inventory
+// Package connect is the "connect" inventory provider: a read-only (GET)
+// client for a paged JSON REST API, used to pull Product and Customer
+// records for a single branch. The API address comes from configuration
+// (INVENTORY_CONNECT_URL), never from code.
+package connect
 
 import (
 	"bytes"
@@ -19,25 +19,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
-)
 
-// Credentials identifies one branch's account in the inventory system. Each
-// branch has its own host, username and API key.
-type Credentials struct {
-	Host     string // fills {host} in the API URL template
-	Username string
-	APIKey   string
-}
+	"ecommerce/backend/internal/inventory"
+)
 
 type Client struct {
 	httpClient  *http.Client
 	urlTemplate string
-	creds       Credentials
+	creds       inventory.Credentials
 }
 
 // NewClient builds a client for one branch. urlTemplate is the API's base
 // URL with a {host} placeholder for the branch's host.
-func NewClient(urlTemplate string, creds Credentials, httpClient *http.Client) *Client {
+func NewClient(urlTemplate string, creds inventory.Credentials, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}

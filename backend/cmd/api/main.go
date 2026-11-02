@@ -25,6 +25,9 @@ import (
 	"ecommerce/backend/internal/db"
 	"ecommerce/backend/internal/events"
 	"ecommerce/backend/internal/httpapi"
+	"ecommerce/backend/internal/inventory"
+	inventoryconnect "ecommerce/backend/internal/inventory/connect"
+	inventoryfake "ecommerce/backend/internal/inventory/fake"
 	"ecommerce/backend/internal/mail"
 	"ecommerce/backend/internal/notify"
 	"ecommerce/backend/internal/payment"
@@ -79,7 +82,12 @@ func run(logger *slog.Logger) error {
 	payments := payment.NewService(pool, providers, secretBox, cfg.OrderAcceptTimeout, logger)
 
 	queries := db.New(pool)
-	engine := sync.NewEngine(pool, secretBox, cfg.InventoryAPIURL, logger)
+	inventoryProviders, err := buildInventoryRegistry(cfg.InventoryProviders, cfg.InventoryConnectURL)
+	if err != nil {
+		return err
+	}
+	logger.Info("inventory providers", "enabled", cfg.InventoryProviders)
+	engine := sync.NewEngine(pool, secretBox, inventoryProviders, logger)
 	sched := scheduler.New(engine, queries, cfg.SyncInterval, cfg.SyncConcurrency, logger)
 
 	go sched.Run(ctx)
@@ -158,6 +166,28 @@ func buildPaymentRegistry(names []string) (payment.Registry, error) {
 		factory, ok := knownProviders[name]
 		if !ok {
 			return nil, fmt.Errorf("PAYMENT_PROVIDERS: unknown provider %q", name)
+		}
+		reg[name] = factory
+	}
+	return reg, nil
+}
+
+// buildInventoryRegistry keeps only the inventory providers named in
+// INVENTORY_PROVIDERS and refuses to start on an unknown name, or on connect
+// without its URL, so a typo stops the deploy instead of the first sync.
+func buildInventoryRegistry(names []string, connectURL string) (inventory.Registry, error) {
+	known := inventory.Registry{
+		inventoryconnect.Name: inventoryconnect.NewFactory(connectURL),
+		inventoryfake.Name:    inventoryfake.New,
+	}
+	reg := inventory.Registry{}
+	for _, name := range names {
+		factory, ok := known[name]
+		if !ok {
+			return nil, fmt.Errorf("INVENTORY_PROVIDERS: unknown provider %q", name)
+		}
+		if name == inventoryconnect.Name && connectURL == "" {
+			return nil, fmt.Errorf("INVENTORY_PROVIDERS: connect needs INVENTORY_CONNECT_URL")
 		}
 		reg[name] = factory
 	}

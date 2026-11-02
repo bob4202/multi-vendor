@@ -144,6 +144,10 @@ POST /v1/admin/vendors/{id}/users                { email, name, role, password?,
 POST /v1/admin/vendors/{id}/users/{userId}/invite → { token, expires_at }        new link, old one stops working
 GET|PUT /v1/admin/branches/{id}/info              store details, same shape as the vendor portal
 POST /v1/admin/branches        now requires vendor_id (plus the existing branch, key and sync routes)
+                               + inventory_provider (optional on create: the server's only provider, or "connect")
+                               422 field inventory_provider when the server doesn't offer it; 422 field host when
+                               another branch uses the same host in the same system. Responses include inventory_provider.
+GET  /v1/admin/inventory-providers → { providers: ["connect", "fake"] }   enabled by INVENTORY_PROVIDERS
 ```
 
 Attention kinds, most urgent first: `sync_failed`, `account_locked`, `vendor_without_owner`, `invite_expired`, `invite_pending`, `no_store_details`, `no_storefront_key`, `never_synced`.

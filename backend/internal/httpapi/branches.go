@@ -32,6 +32,7 @@ func isUniqueViolation(err error) bool {
 type branchResponse struct {
 	ID                              string   `json:"id"`
 	Name                            string   `json:"name"`
+	InventoryProvider               string   `json:"inventory_provider"`
 	Host                            string   `json:"host"`
 	APIUsername                     string   `json:"api_username"`
 	IsActive                        bool     `json:"is_active"`
@@ -54,6 +55,7 @@ func toBranchResponse(b db.Branch) branchResponse {
 	return branchResponse{
 		ID:                              b.ID.String(),
 		Name:                            b.Name,
+		InventoryProvider:               b.InventoryProvider,
 		Host:                            b.Host,
 		APIUsername:                     b.ApiUsername,
 		IsActive:                        b.IsActive,
@@ -69,7 +71,10 @@ func toBranchResponse(b db.Branch) branchResponse {
 // pointer field means "leave unchanged" - same convention as IsActive - so
 // an explicit empty array must be sent to clear a filter.
 type createBranchRequest struct {
-	Name                            string     `json:"name"`
+	Name string `json:"name"`
+	// Which inventory system the branch syncs from. Optional on create: the
+	// server's only provider, or "connect", when left out.
+	InventoryProvider               string     `json:"inventory_provider"`
 	Host                            string     `json:"host"`
 	APIUsername                     string     `json:"api_username"`
 	APIKey                          string     `json:"api_key"`
@@ -134,6 +139,15 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	provider := req.InventoryProvider
+	if provider == "" {
+		provider = s.defaultInventoryProvider()
+	}
+	if !s.inventoryProviderAllowed(provider) {
+		writeIssues(w, "unknown inventory provider", []portal.Issue{{Field: "inventory_provider", Message: "This inventory system isn't available on this server"}})
+		return
+	}
+
 	var storefrontURL *string
 	if req.StorefrontURL != nil {
 		v, err := normalizeStorefrontURL(*req.StorefrontURL)
@@ -174,13 +188,14 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		AllowedProductRefs:              productRefs,
 		VendorID:                        *req.VendorID,
 		StorefrontUrl:                   storefrontURL,
+		InventoryProvider:               provider,
 	})
 	if isForeignKeyViolation(err) {
 		writeError(w, http.StatusUnprocessableEntity, "vendor not found")
 		return
 	}
 	if isUniqueViolation(err) {
-		writeIssues(w, "host already used", []portal.Issue{{Field: "host", Message: "Another branch already uses this inventory system host"}})
+		writeIssues(w, "host already used", []portal.Issue{{Field: "host", Message: "Another branch already uses this host in the same inventory system"}})
 		return
 	}
 	if err != nil {
@@ -211,6 +226,14 @@ func (s *Server) handleUpdateBranch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name, host, username := existing.Name, existing.Host, existing.ApiUsername
+	provider := existing.InventoryProvider
+	if req.InventoryProvider != "" && req.InventoryProvider != provider {
+		if !s.inventoryProviderAllowed(req.InventoryProvider) {
+			writeIssues(w, "unknown inventory provider", []portal.Issue{{Field: "inventory_provider", Message: "This inventory system isn't available on this server"}})
+			return
+		}
+		provider = req.InventoryProvider
+	}
 	if req.Name != "" {
 		name = req.Name
 	}
@@ -267,7 +290,12 @@ func (s *Server) handleUpdateBranch(w http.ResponseWriter, r *http.Request) {
 		AllowedProductRefs:              productRefs,
 		VendorID:                        vendorID,
 		StorefrontUrl:                   storefrontURL,
+		InventoryProvider:               provider,
 	})
+	if isUniqueViolation(err) {
+		writeIssues(w, "host already used", []portal.Issue{{Field: "host", Message: "Another branch already uses this host in the same inventory system"}})
+		return
+	}
 	// Moving a branch to another vendor fails while that vendor's staff are
 	// still assigned to it (composite FK on vendor_user_branches).
 	if isForeignKeyViolation(err) {
@@ -427,4 +455,29 @@ func (s *Server) handleAdminListBranchCategories(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, categories)
+}
+
+// handleListInventoryProviders lists the inventory systems branches can
+// pick on this server, for the admin branch form.
+func (s *Server) handleListInventoryProviders(w http.ResponseWriter, r *http.Request) {
+	names := []string{}
+	if s.engine != nil {
+		names = s.engine.ProviderNames()
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"providers": names})
+}
+
+func (s *Server) inventoryProviderAllowed(name string) bool {
+	return s.engine != nil && s.engine.HasProvider(name)
+}
+
+// defaultInventoryProvider is used when a create request doesn't say:
+// the only enabled provider, otherwise "connect".
+func (s *Server) defaultInventoryProvider() string {
+	if s.engine != nil {
+		if names := s.engine.ProviderNames(); len(names) == 1 {
+			return names[0]
+		}
+	}
+	return "connect"
 }

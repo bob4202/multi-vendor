@@ -98,6 +98,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/me", s.handleAdminMe)
 				r.Get("/overview", s.handleAdminOverview)
 
+				r.Get("/inventory-providers", s.handleListInventoryProviders)
 				r.Route("/branches", func(r chi.Router) {
 					r.Get("/", s.handleListBranches)
 					r.Post("/", s.handleCreateBranch)

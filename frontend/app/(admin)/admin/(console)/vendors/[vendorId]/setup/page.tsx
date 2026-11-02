@@ -108,12 +108,14 @@ export default async function VendorSetupPage({ params, searchParams }: Props) {
   const nextHref = withBranch(branch?.id)
 
   // Only fetch what the current step needs.
-  const [categories, branchDetail, storeInfo, syncStates] = await Promise.all([
-    step === 1 ? adminAPI.listCategories() : null,
-    step === 1 && branch ? adminAPI.getBranch(branch.id) : null,
-    step === 2 && branch ? adminAPI.getStoreInfo(branch.id) : null,
-    step === 4 && branch ? adminAPI.syncState(branch.id) : null,
-  ])
+  const [categories, providers, branchDetail, storeInfo, syncStates] =
+    await Promise.all([
+      step === 1 ? adminAPI.listCategories() : null,
+      step === 1 ? adminAPI.listInventoryProviders() : null,
+      step === 1 && branch ? adminAPI.getBranch(branch.id) : null,
+      step === 2 && branch ? adminAPI.getStoreInfo(branch.id) : null,
+      step === 4 && branch ? adminAPI.syncState(branch.id) : null,
+    ])
   const productSync = syncStates?.find((s) => s.resource === "product")
 
   return (
@@ -174,11 +176,12 @@ export default async function VendorSetupPage({ params, searchParams }: Props) {
             <CardDescription>{STEP_COPY[step].description}</CardDescription>
           </CardHeader>
           <CardContent>
-            {step === 1 && categories && (
+            {step === 1 && categories && providers && (
               <BranchStep
                 vendorId={vendor.id}
                 branch={branchDetail ?? undefined}
                 categories={categories}
+                providers={providers}
                 setupPath={base}
               />
             )}
