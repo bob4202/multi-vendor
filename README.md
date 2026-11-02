@@ -89,3 +89,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 - Product search by PLU or barcode
 - `/categories` and `/about` pages
 - Fix ESLint (eslint 10 doesn't work with the React plugin in eslint-config-next)
+
+## License
+
+Copyright (c) 2026 Thet Naung Soe. All rights reserved. The code is public for viewing only; see [LICENSE](LICENSE).
