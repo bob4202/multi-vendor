@@ -280,6 +280,27 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 		}
 	}
 
+	// Rejected or cancelled before the money was taken: queue a void to
+	// release the customer's card hold. Same transaction as the status
+	// change, so the job exists only if the change is saved.
+	if in.NewStatus == StatusRejected || in.NewStatus == StatusCancelled {
+		payment, err := q.GetLatestPaymentForOrder(ctx, in.OrderID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No payment (e.g. an order from before card payments): nothing to release.
+		} else if err != nil {
+			return db.Order{}, fmt.Errorf("load payment: %w", err)
+		} else if payment.Status == "authorised" {
+			_, err = q.EnqueuePaymentJob(ctx, db.EnqueuePaymentJobParams{
+				PaymentID:   payment.ID,
+				Kind:        "void",
+				RequestedBy: pgtype.UUID{Bytes: in.ActorUserID, Valid: true},
+			})
+			if err != nil {
+				return db.Order{}, fmt.Errorf("queue void: %w", err)
+			}
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return db.Order{}, err
 	}
