@@ -212,7 +212,7 @@ Order summary and detail gain `awaiting_customer`, `collect_by`; detail also `al
 
 ## Card payments
 
-Card is the only way to pay. Each vendor brings their own Stripe (later Dojo) keys; the total is held at checkout, captured at `ready` and released on cancel. Full plan, data model and checklist: [`backend/docs/payments-guide.md`](payments-guide.md). Phase 2 (taking a card hold) is built; capture, void, refund and Stripe are next.
+Card is the only way to pay. Each vendor brings their own Stripe (later Dojo) keys; the total is held at checkout, captured at `ready` and released on cancel. Full plan, data model and checklist: [`backend/docs/payments-guide.md`](payments-guide.md). Phase 2 (taking a card hold) is built, and holds are released when an order is rejected, cancelled or not accepted in time. Capture, refund and Stripe are next.
 
 **Storefront API** (storefront key)
 
@@ -242,7 +242,7 @@ POST /v1/webhooks/{provider}/{account_id}   → 200 once stored (also duplicates
 
 **Vendor API**: order detail gains `payment` (same shape). Orders that were never paid (`awaiting_payment`, or cancelled with `rejection_reason = "payment_not_completed"`) never appear in vendor lists, detail or the live feed.
 
-**Jobs**: unpaid orders are cancelled after `payment_deadline` with `rejection_reason = "payment_not_completed"` (the customer gets an email saying so).
+**Jobs**: unpaid orders are cancelled after `payment_deadline` with `rejection_reason = "payment_not_completed"` (the customer gets an email saying so). When an order with a card hold is rejected or cancelled by a vendor or an admin, or isn't accepted in time, a `void` job is queued in the same transaction as the status change. A worker runs the jobs, retrying after 1, 3 and 5 minutes.
 
 **Local development**: `PAYMENT_PROVIDERS=fake` in `backend/.env`. `make seed` gives every vendor an active `fake` account. The fake payment page lives on the API at `/fake-pay/{ref}` (only routed when `fake` is enabled); Pay and Decline send a signed webhook through the real webhook route.
 
