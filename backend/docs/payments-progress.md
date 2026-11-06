@@ -2,7 +2,7 @@
 
 Handoff notes for picking up the payments work on another machine. The plan and full checklist are in [`payments-guide.md`](payments-guide.md); this file is the short "what's done, what's next" on top of it.
 
-Last updated: 2026-10-31.
+Last updated: 2026-11-06.
 
 ## How we work on this
 
@@ -41,8 +41,8 @@ Last updated: 2026-10-31.
 
 ## Next: phase 3 (capture, void, refund)
 
-- [ ] **B11** `payment_jobs` worker. `void` jobs are already being queued (late or double payments) and nothing runs them yet.
-- [ ] **B12** Queue `capture` at `ready`, `void` on reject/cancel/accept timeout, `refund` on cancel after `ready`, in the same transaction as the status change.
+- [x] **B11** `payment_jobs` worker. It runs `void` jobs only for now.
+- [ ] **B12** Queue `capture` at `ready` and `refund` on cancel after `ready`, in the same transaction as the status change. `void` on reject, cancel and accept timeout is done.
 - [ ] B13–B15, F4–F5: see `payments-guide.md`.
 
 ## Optional tidy-ups (suggested, not required)

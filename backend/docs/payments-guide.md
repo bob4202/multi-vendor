@@ -549,8 +549,8 @@ Work top to bottom. Each phase ends with something you can test, and the `fake` 
 
 ### Phase 3: capture, void, refund
 
-- [ ] B11 `payment_jobs` worker (claim with `SKIP LOCKED`, backoff, `last_error`), started next to the outbox worker
-- [ ] B12 Hook `ChangeOrderStatus`, `RejectOrder`, `ExpireOverdue`: queue `capture` at `ready`, `void` on reject/cancel, `refund` on cancel after `ready`, in the same transaction as the status change
+- [x] B11 `payment_jobs` worker (claim with `SKIP LOCKED`, backoff, `last_error`), started next to the outbox worker
+- [ ] B12 Hook `ChangeOrderStatus`, `RejectOrder`, `ExpireOverdue`: queue `capture` at `ready`, `void` on reject/cancel, `refund` on cancel after `ready`, in the same transaction as the status change. Void is done (reject, cancel, accept timeout); capture and refund are still to do
 - [ ] B13 Early capture for deliveries more than `PAYMENT_CAPTURE_EARLY_DAYS` away (capture at accept, refund the difference at `ready`)
 - [ ] B14 `capture_failed` handling and the vendor warning flag
 - [ ] B15 `POST …/orders/{orderId}/refunds` (owner, manager), with history entry

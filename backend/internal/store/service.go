@@ -638,14 +638,24 @@ func (s *Service) AcceptOrder(ctx context.Context, branchID, orderID uuid.UUID) 
 	if err != nil {
 		return Order{}, err
 	}
-	s.recordStatusEvent(ctx, row.ID, "accepted", nil)
+	if err := s.recordStatusEvent(ctx, s.queries, row.ID, "accepted", nil); err != nil {
+		// The order is already accepted, so don't report this as a failure.
+		s.logger.Error("record order status event failed", "order_id", row.ID, "error", err)
+	}
 	return s.withItems(ctx, row)
 }
 
 // RejectOrder declines a pending order, with an optional reason for the
-// customer.
+// customer, and releases any card hold in the same transaction.
 func (s *Service) RejectOrder(ctx context.Context, branchID, orderID uuid.UUID, reason string) (Order, error) {
-	row, err := s.queries.RejectOrder(ctx, db.RejectOrderParams{
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Order{}, err
+	}
+	defer tx.Rollback(ctx) // no-op after Commit
+	q := s.queries.WithTx(tx)
+
+	row, err := q.RejectOrder(ctx, db.RejectOrderParams{
 		ID: orderID, BranchID: branchID, Reason: optional(reason),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -654,21 +664,55 @@ func (s *Service) RejectOrder(ctx context.Context, branchID, orderID uuid.UUID, 
 	if err != nil {
 		return Order{}, err
 	}
-	s.recordStatusEvent(ctx, row.ID, "rejected", optional(reason))
+	if err := s.recordStatusEvent(ctx, q, row.ID, "rejected", optional(reason)); err != nil {
+		return Order{}, err
+	}
+	if err := QueueVoidIfHeld(ctx, q, row.ID, pgtype.UUID{}); err != nil {
+		return Order{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Order{}, err
+	}
 	return s.withItems(ctx, row)
+}
+
+// QueueVoidIfHeld queues a void to release the customer's card hold, if the
+// order's latest payment is still held. Pass the q of the transaction that
+// changes the order, so the job exists only if the change is saved. An empty
+// actor means the system or an admin key did it, not a vendor user.
+func QueueVoidIfHeld(ctx context.Context, q *db.Queries, orderID uuid.UUID, actor pgtype.UUID) error {
+	payment, err := q.GetLatestPaymentForOrder(ctx, orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No payment (e.g. an order from before card payments): nothing to release.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load payment: %w", err)
+	}
+	if payment.Status != "authorised" {
+		return nil
+	}
+	_, err = q.EnqueuePaymentJob(ctx, db.EnqueuePaymentJobParams{
+		PaymentID:   payment.ID,
+		Kind:        "void",
+		RequestedBy: actor,
+	})
+	if err != nil {
+		return fmt.Errorf("queue void: %w", err)
+	}
+	return nil
 }
 
 // recordStatusEvent adds a pending -> status entry to the order's history
 // (order_status_events), which the vendor portal shows as a timeline. No
 // actor: these changes come from the admin API or the expiry job, not a
-// vendor user. Best effort - the status change itself already happened.
-func (s *Service) recordStatusEvent(ctx context.Context, orderID uuid.UUID, to string, note *string) {
+// vendor user. Pass the q of the transaction that changes the order, so the
+// entry is saved only if the change is.
+func (s *Service) recordStatusEvent(ctx context.Context, q *db.Queries, orderID uuid.UUID, to string, note *string) error {
 	from := "pending"
-	if err := s.queries.InsertOrderStatusEvent(ctx, db.InsertOrderStatusEventParams{
+	return q.InsertOrderStatusEvent(ctx, db.InsertOrderStatusEventParams{
 		OrderID: orderID, FromStatus: &from, ToStatus: to, Note: note, Kind: "status",
-	}); err != nil {
-		s.logger.Error("record order status event failed", "order_id", orderID, "error", err)
-	}
+	})
 }
 
 // whyNotPending tells "no such order" apart from "it exists but can't be
@@ -685,17 +729,35 @@ func (s *Service) whyNotPending(ctx context.Context, branchID, orderID uuid.UUID
 }
 
 // ExpireOverdue cancels every pending order whose acceptance window has
-// passed, across all branches.
+// passed, across all branches, and releases their card holds. It's all or
+// nothing: if one order fails, none are cancelled and the next run retries.
 func (s *Service) ExpireOverdue(ctx context.Context) (int, error) {
-	rows, err := s.queries.ExpireOverdueOrders(ctx)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx) // no-op after Commit
+	q := s.queries.WithTx(tx)
+
+	rows, err := q.ExpireOverdueOrders(ctx)
 	if err != nil {
 		return 0, err
 	}
 	note := "Not accepted in time"
 	for _, row := range rows {
+		if err := s.recordStatusEvent(ctx, q, row.ID, "cancelled", &note); err != nil {
+			return 0, err
+		}
+		if err := QueueVoidIfHeld(ctx, q, row.ID, pgtype.UUID{}); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	for _, row := range rows {
 		s.logger.Info("order not accepted in time - cancelled",
 			"order_id", row.ID, "branch_id", row.BranchID, "reference", row.Reference)
-		s.recordStatusEvent(ctx, row.ID, "cancelled", &note)
 	}
 	return len(rows), nil
 }
