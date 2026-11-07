@@ -13,8 +13,8 @@ func TestNextStatuses(t *testing.T) {
 		{StatusPending, "collection", []string{StatusAccepted, StatusRejected, StatusCancelled}},
 		{StatusAccepted, "delivery", []string{StatusPicking, StatusCancelled}},
 		{StatusPicking, "collection", []string{StatusReady, StatusCancelled}},
-		{StatusReady, "collection", []string{StatusCompleted, StatusNoShow, StatusCancelled}},
-		{StatusReady, "delivery", []string{StatusOutForDelivery, StatusCancelled}},
+		{StatusReady, "collection", []string{StatusCompleted, StatusNoShow}},
+		{StatusReady, "delivery", []string{StatusOutForDelivery}},
 		{StatusOutForDelivery, "delivery", []string{StatusCompleted}},
 	}
 	for _, c := range cases {
@@ -46,6 +46,11 @@ func TestCanTransitionRejectsSkipsAndWrongFulfilment(t *testing.T) {
 	}
 	if canTransition(StatusCompleted, StatusCancelled, "collection") {
 		t.Error("completed is terminal")
+	}
+	for _, f := range []string{"collection", "delivery"} {
+		if canTransition(StatusReady, StatusCancelled, f) {
+			t.Errorf("ready (%s) can't be cancelled: the money is taken at ready", f)
+		}
 	}
 }
 

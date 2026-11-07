@@ -20,6 +20,7 @@ func TestGiveUp(t *testing.T) {
 		{"provider doesn't know the payment", 1, fmt.Errorf("fake void x: %w", ErrNotCapturable), true},
 		{"money already taken", 1, fmt.Errorf("void: %w", ErrAlreadyCaptured), true},
 		{"no provider reference", 1, errNoPaymentRef, true},
+		{"capture job with no valid amount", 1, errInvalidAmount, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

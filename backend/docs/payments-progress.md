@@ -2,7 +2,7 @@
 
 Handoff notes for picking up the payments work on another machine. The plan and full checklist are in [`payments-guide.md`](payments-guide.md); this file is the short "what's done, what's next" on top of it.
 
-Last updated: 2026-11-06.
+Last updated: 2026-11-07.
 
 ## How we work on this
 
@@ -41,8 +41,8 @@ Last updated: 2026-11-06.
 
 ## Next: phase 3 (capture, void, refund)
 
-- [x] **B11** `payment_jobs` worker. It runs `void` jobs only for now.
-- [ ] **B12** Queue `capture` at `ready` and `refund` on cancel after `ready`, in the same transaction as the status change. `void` on reject, cancel and accept timeout is done.
+- [x] **B11** `payment_jobs` worker. It runs `void` and `capture` jobs; `refund` comes with B15.
+- [x] **B12** `capture` at `ready`, `void` on reject, cancel and accept timeout, each in the same transaction as the status change. A `ready` order can't be cancelled; refunds are the store's choice (B15).
 - [ ] B13–B15, F4–F5: see `payments-guide.md`.
 
 ## Optional tidy-ups (suggested, not required)

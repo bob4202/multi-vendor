@@ -22,8 +22,12 @@ const (
 var retryDelays = [...]time.Duration{time.Minute, 3 * time.Minute, 5 * time.Minute}
 
 // errNoPaymentRef: the payment never got a provider reference, so there is
-// nothing to void and retrying can't help.
+// nothing to void or capture and retrying can't help.
 var errNoPaymentRef = errors.New("payment has no provider reference")
+
+// errInvalidAmount: a capture job without an amount above zero. The job was
+// queued wrong, so retrying can't help.
+var errInvalidAmount = errors.New("capture job has no valid amount")
 
 func (s *Service) RunJobs(ctx context.Context) {
 
@@ -56,14 +60,59 @@ func (s *Service) claimJobs(ctx context.Context) error {
 
 	for _, job := range jobs {
 		s.logger.Info("claimed payment job", "id", job.ID, "kind", job.Kind, "payment_id", job.PaymentID)
-		if job.Kind != "void" {
-			s.logger.Info("Not Supported yet", "kind", job.Kind)
-			continue
-		}
-		if voidErr := s.voidJob(ctx, job); voidErr != nil {
-			s.failOrRetry(ctx, job, voidErr)
+		switch job.Kind {
+		case "capture":
+			if captureErr := s.captureJob(ctx, job); captureErr != nil {
+				s.failOrRetry(ctx, job, captureErr)
+			}
+		case "void":
+			if voidErr := s.voidJob(ctx, job); voidErr != nil {
+				s.failOrRetry(ctx, job, voidErr)
+			}
+		default:
+			s.logger.Info("not supported at the moment", "kind", job.Kind)
 		}
 	}
+	return nil
+
+}
+
+// captureJob takes the job's amount from the customer's card hold, then marks
+// the payment captured and the job done. The job id is the idempotency key, so
+// a retry never takes the money twice.
+func (s *Service) captureJob(ctx context.Context, job db.ClaimDuePaymentJobsRow) error {
+	if job.PaymentRef == nil {
+		return errNoPaymentRef
+	}
+	if job.Amount == nil || *job.Amount <= 0 {
+		return errInvalidAmount
+	}
+
+	sk, err := s.secret.Decrypt(job.SecretKeyEnc)
+	if err != nil {
+		return err
+	}
+	provider, err := s.providers.Build(job.Provider, Credentials{
+		AccountID: job.AccountID,
+		SecretKey: sk,
+		Live:      job.Live,
+	})
+	if err != nil {
+		return err
+	}
+
+	if err = provider.Capture(ctx, *job.PaymentRef, *job.Amount, job.ID.String()); err != nil {
+		return err
+	}
+	_, err = s.queries.MarkPaymentCaptured(ctx, db.MarkPaymentCapturedParams{Amount: *job.Amount, ID: job.PaymentID})
+	if err != nil {
+		return err
+	}
+	err = s.queries.MarkPaymentJobDone(ctx, db.MarkPaymentJobDoneParams{ID: job.ID})
+	if err != nil {
+		return err
+	}
+
 	return nil
 
 }
@@ -138,7 +187,8 @@ func (s *Service) failOrRetry(ctx context.Context, job db.ClaimDuePaymentJobsRow
 func isPermanentJobError(err error) bool {
 	return errors.Is(err, ErrNotCapturable) ||
 		errors.Is(err, ErrAlreadyCaptured) ||
-		errors.Is(err, errNoPaymentRef)
+		errors.Is(err, errNoPaymentRef) ||
+		errors.Is(err, errInvalidAmount)
 }
 
 // giveUp decides whether a failed job stops for good. attempts already

@@ -703,6 +703,36 @@ func QueueVoidIfHeld(ctx context.Context, q *db.Queries, orderID uuid.UUID, acto
 	return nil
 }
 
+// QueueCaptureIfHeld queues a capture of amount (the order's total once it's
+// ready) if the order's latest payment is still held. Pass the q of the
+// transaction that changes the order, so the job exists only if the change is
+// saved.
+func QueueCaptureIfHeld(ctx context.Context, q *db.Queries, orderID uuid.UUID, actor pgtype.UUID, amount int64) error {
+	payment, err := q.GetLatestPaymentForOrder(ctx, orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No payment (e.g. an order from before card payments): nothing to capture.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load payment: %w", err)
+	}
+	if payment.Status != "authorised" {
+		return nil
+	}
+
+	_, err = q.EnqueuePaymentJob(ctx, db.EnqueuePaymentJobParams{
+		PaymentID:   payment.ID,
+		Kind:        "capture",
+		RequestedBy: actor,
+		Amount:      &amount,
+	})
+	if err != nil {
+		return fmt.Errorf("queue capture: %w", err)
+	}
+
+	return nil
+}
+
 // recordStatusEvent adds a pending -> status entry to the order's history
 // (order_status_events), which the vendor portal shows as a timeline. No
 // actor: these changes come from the admin API or the expiry job, not a

@@ -80,7 +80,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 
 ## Roadmap
 
-- **Card payments:** capture at `ready`, refunds, then Stripe (see the payments guide)
+- **Card payments:** store-issued refunds, then Stripe (see the payments guide)
 - Vendors marking products as featured
 - User management: adding, removing and disabling staff, changing roles; password reset by email
 - Support for more inventory systems
