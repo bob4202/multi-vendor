@@ -22,12 +22,12 @@ const (
 var retryDelays = [...]time.Duration{time.Minute, 3 * time.Minute, 5 * time.Minute}
 
 // errNoPaymentRef: the payment never got a provider reference, so there is
-// nothing to void or capture and retrying can't help.
+// nothing to void, capture or refund and retrying can't help.
 var errNoPaymentRef = errors.New("payment has no provider reference")
 
-// errInvalidAmount: a capture job without an amount above zero. The job was
-// queued wrong, so retrying can't help.
-var errInvalidAmount = errors.New("capture job has no valid amount")
+// errInvalidAmount: a capture or refund job without an amount above zero. The
+// job was queued wrong, so retrying can't help.
+var errInvalidAmount = errors.New("job has no valid amount")
 
 func (s *Service) RunJobs(ctx context.Context) {
 
@@ -69,10 +69,74 @@ func (s *Service) claimJobs(ctx context.Context) error {
 			if voidErr := s.voidJob(ctx, job); voidErr != nil {
 				s.failOrRetry(ctx, job, voidErr)
 			}
+		case "refund":
+			if refundErr := s.refundJob(ctx, job); refundErr != nil {
+				s.failOrRetry(ctx, job, refundErr)
+			}
 		default:
 			s.logger.Info("not supported at the moment", "kind", job.Kind)
 		}
 	}
+	return nil
+
+}
+
+// refundJob gives the job's amount back to the customer, then adds it to the
+// payment's refunded total and marks the job done, in one transaction. The
+// total is read from the locked payment, not the job: two refunds claimed in
+// the same batch would both see the same old total, and one would be lost.
+// The job id is the idempotency key, so a retry never pays out twice.
+func (s *Service) refundJob(ctx context.Context, job db.ClaimDuePaymentJobsRow) error {
+	if job.PaymentRef == nil {
+		return errNoPaymentRef
+	}
+	if job.Amount == nil || *job.Amount <= 0 {
+		return errInvalidAmount
+	}
+
+	sk, err := s.secret.Decrypt(job.SecretKeyEnc)
+	if err != nil {
+		return err
+	}
+	provider, err := s.providers.Build(job.Provider, Credentials{
+		AccountID: job.AccountID,
+		SecretKey: sk,
+		Live:      job.Live,
+	})
+	if err != nil {
+		return err
+	}
+
+	refundRef, err := provider.Refund(ctx, *job.PaymentRef, *job.Amount, job.ID.String())
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op after Commit
+	q := s.queries.WithTx(tx)
+
+	payment, err := q.LockPayment(ctx, job.PaymentID)
+	if err != nil {
+		return err
+	}
+
+	total := payment.AmountRefunded + *job.Amount
+	_, err = q.SetPaymentRefundedTotal(ctx, db.SetPaymentRefundedTotalParams{RefundedTotal: total, ID: payment.ID})
+	if err != nil {
+		return err
+	}
+	if err := q.MarkPaymentJobDone(ctx, db.MarkPaymentJobDoneParams{ProviderRef: &refundRef, ID: job.ID}); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
 	return nil
 
 }
@@ -188,7 +252,9 @@ func isPermanentJobError(err error) bool {
 	return errors.Is(err, ErrNotCapturable) ||
 		errors.Is(err, ErrAlreadyCaptured) ||
 		errors.Is(err, errNoPaymentRef) ||
-		errors.Is(err, errInvalidAmount)
+		errors.Is(err, errInvalidAmount) ||
+		errors.Is(err, ErrNotRefundable) ||
+		errors.Is(err, ErrRefundTooLarge)
 }
 
 // giveUp decides whether a failed job stops for good. attempts already
