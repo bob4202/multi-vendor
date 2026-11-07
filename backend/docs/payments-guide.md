@@ -8,7 +8,7 @@ Plan written 2026-10-20. The contract below is what the frontend gets built agai
 
 Build a new `internal/payment` package around a small `Provider` interface, with Stripe as the first adapter and Dojo added later without touching orders. The checkout code calls a `payment.Service`, never Stripe directly. Each provider only translates calls to its own API and turns its webhooks into one shared event shape.
 
-This follows the decision already in [`api.md`](api.md) (Customer side): **hold the total at checkout, capture the final amount at `ready`, release it on cancel.** Substitutions only lower the total, so a partial capture always covers the final amount.
+This follows the decision already in [`api.md`](api.md) (Customer side): **hold the total at checkout, capture the final amount at `ready`, release it if the order is cancelled before then.** A `ready` order can't be cancelled, so the money is kept (fresh goods, labour done); the store can choose to refund part of it. Substitutions only lower the total, so a partial capture always covers the final amount.
 
 Four decisions shape the rest of this guide:
 
@@ -323,7 +323,7 @@ stateDiagram-v2
 | Shop cancels from `accepted` or `picking` | `cancelled`                                                     | Queue `void`                                                    | `voided`                          |
 | Shop marks `ready`                        | `ready`                                                         | Queue `capture` for the current `total` (after substitutions)   | `captured`                        |
 | Collected, or no-show                     | `completed` / `no_show`                                         | None: already captured; no refund on no-show per terms          | `captured`                        |
-| Cancel after `ready`                      | `cancelled`                                                     | Queue `refund` of the captured amount                           | `refunded`                        |
+| Cancel after `ready`                      | not allowed                                                     | None: the money is kept; any refund is the store's choice       | `captured`                        |
 | Vendor refunds part of an order           | unchanged                                                       | Queue `refund` (owner/manager only)                             | `partially_refunded` / `refunded` |
 | Capture fails (hold expired, card closed) | `ready` stays                                                   | Mark `capture_failed`; vendor sees "take payment at collection" | `capture_failed`                  |
 
@@ -550,7 +550,7 @@ Work top to bottom. Each phase ends with something you can test, and the `fake` 
 ### Phase 3: capture, void, refund
 
 - [x] B11 `payment_jobs` worker (claim with `SKIP LOCKED`, backoff, `last_error`), started next to the outbox worker
-- [ ] B12 Hook `ChangeOrderStatus`, `RejectOrder`, `ExpireOverdue`: queue `capture` at `ready`, `void` on reject/cancel, `refund` on cancel after `ready`, in the same transaction as the status change. Void is done (reject, cancel, accept timeout); capture and refund are still to do
+- [x] B12 Hook `ChangeOrderStatus`, `RejectOrder`, `ExpireOverdue`: queue `capture` at `ready` and `void` on reject/cancel/accept timeout, in the same transaction as the status change. No automatic refund on cancel after `ready`
 - [ ] B13 Early capture for deliveries more than `PAYMENT_CAPTURE_EARLY_DAYS` away (capture at accept, refund the difference at `ready`)
 - [ ] B14 `capture_failed` handling and the vendor warning flag
 - [ ] B15 `POST …/orders/{orderId}/refunds` (owner, manager), with history entry

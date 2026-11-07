@@ -118,7 +118,7 @@ GET  /v1/vendor/branches/{id}/products | categories | sync-state      POST /v1/v
 pending  → accepted | rejected (reason required) | cancelled
 accepted → picking | cancelled
 picking  → ready | cancelled
-ready    → completed | no_show (collection) · out_for_delivery (delivery) | cancelled
+ready    → completed | no_show (collection) · out_for_delivery (delivery). No cancel: the money is taken at `ready`
 out_for_delivery → completed
 ```
 
@@ -163,7 +163,7 @@ Attention kinds, most urgent first: `sync_failed`, `account_locked`, `vendor_wit
 - **Collection window**: once ready, collect within 60 min (or by closing time if sooner). 6 min after that it becomes `no_show` automatically. No refund, per the terms accepted at checkout (`terms_version` + time are stored on the order).
 - **Live updates**: Server-Sent Events. A Postgres trigger on `orders` sends `NOTIFY order_events`; every API instance listens and streams to its clients. Next route handlers relay the stream, so the storefront key and session tokens stay on the server.
 - **Notifications**: a `notification_outbox` table (status changes are written by a trigger, substitutions by the service), worked through by one job using `FOR UPDATE SKIP LOCKED` (safe with several API instances). It sends email over SMTP (Mailpit locally) and Web Push (VAPID).
-- **Card payments (later)**: hold the total at checkout, capture the final amount at `ready`, release on cancel. Substitutions only ever lower the total, so a partial capture always works. Plan: [`backend/docs/payments-guide.md`](payments-guide.md).
+- **Card payments (later)**: hold the total at checkout, capture the final amount at `ready`, release the hold if the order is cancelled before that. A `ready` order can't be cancelled (fresh goods, labour done); any refund is the store's choice. Substitutions only ever lower the total, so a partial capture always works. Plan: [`backend/docs/payments-guide.md`](payments-guide.md).
 
 **Storefront API additions** (all with the storefront key; a signed-in customer also sends `X-Customer-Session: <token>`)
 
@@ -212,7 +212,7 @@ Order summary and detail gain `awaiting_customer`, `collect_by`; detail also `al
 
 ## Card payments
 
-Card is the only way to pay. Each vendor brings their own Stripe (later Dojo) keys; the total is held at checkout, captured at `ready` and released on cancel. Full plan, data model and checklist: [`backend/docs/payments-guide.md`](payments-guide.md). Phase 2 (taking a card hold) is built, and holds are released when an order is rejected, cancelled or not accepted in time. Capture, refund and Stripe are next.
+Card is the only way to pay. Each vendor brings their own Stripe (later Dojo) keys; the total is held at checkout, captured at `ready` and released if the order is cancelled before then. A `ready` order can't be cancelled, so the money is kept; the store can choose to refund part of it. Full plan, data model and checklist: [`backend/docs/payments-guide.md`](payments-guide.md). Built so far: taking a hold, releasing it when an order is rejected, cancelled or not accepted in time, and capturing the total (after substitutions) at `ready`. Store-issued refunds and Stripe are next.
 
 **Storefront API** (storefront key)
 
@@ -242,7 +242,7 @@ POST /v1/webhooks/{provider}/{account_id}   → 200 once stored (also duplicates
 
 **Vendor API**: order detail gains `payment` (same shape). Orders that were never paid (`awaiting_payment`, or cancelled with `rejection_reason = "payment_not_completed"`) never appear in vendor lists, detail or the live feed.
 
-**Jobs**: unpaid orders are cancelled after `payment_deadline` with `rejection_reason = "payment_not_completed"` (the customer gets an email saying so). When an order with a card hold is rejected or cancelled by a vendor or an admin, or isn't accepted in time, a `void` job is queued in the same transaction as the status change. A worker runs the jobs, retrying after 1, 3 and 5 minutes.
+**Jobs**: unpaid orders are cancelled after `payment_deadline` with `rejection_reason = "payment_not_completed"` (the customer gets an email saying so). When an order with a card hold is rejected or cancelled by a vendor or an admin, or isn't accepted in time, a `void` job is queued in the same transaction as the status change. Marking an order `ready` queues a `capture` of its total the same way. A worker runs the jobs, retrying after 1, 3 and 5 minutes.
 
 **Local development**: `PAYMENT_PROVIDERS=fake` in `backend/.env`. `make seed` gives every vendor an active `fake` account. The fake payment page lives on the API at `/fake-pay/{ref}` (only routed when `fake` is enabled); Pay and Decline send a signed webhook through the real webhook route.
 

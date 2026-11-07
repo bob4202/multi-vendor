@@ -56,7 +56,6 @@ var transitions = map[string][]transition{
 		{to: StatusCompleted, onlyFor: "collection"},
 		{to: StatusNoShow, onlyFor: "collection"},
 		{to: StatusOutForDelivery, onlyFor: "delivery"},
-		{to: StatusCancelled},
 	},
 	StatusOutForDelivery: {
 		{to: StatusCompleted},
@@ -286,6 +285,14 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 	if in.NewStatus == StatusRejected || in.NewStatus == StatusCancelled {
 		actor := pgtype.UUID{Bytes: in.ActorUserID, Valid: true}
 		if err := store.QueueVoidIfHeld(ctx, q, in.OrderID, actor); err != nil {
+			return db.Order{}, err
+		}
+	}
+
+	if in.NewStatus == StatusReady {
+		actor := pgtype.UUID{Bytes: in.ActorUserID, Valid: true}
+		err := store.QueueCaptureIfHeld(ctx, q, in.OrderID, actor, updated.Total)
+		if err != nil {
 			return db.Order{}, err
 		}
 	}
