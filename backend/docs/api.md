@@ -204,7 +204,7 @@ POST …/orders/{orderId}/items/{itemId}/unavailable  { substitute: { product_id
 DELETE …/orders/{orderId}/items/{itemId}/substitution                                            → order detail (withdraw a proposal)
 GET  …/events                              → text/event-stream, "event: order" { id, reference, status, op } for the branch
 ```
-Order summary and detail gain `awaiting_customer`, `collect_by`; detail also `allow_substitutions`, `ready_at`, `requires_collection_code` (staff never see the code itself), and items gain the same `id/status/charged_total/substitution` fields as the storefront. `next_statuses` leaves out `ready` while an answer is pending. Events gain `kind` (`status` | `substitution` | `removed` | `code_override`).
+Order summary and detail gain `awaiting_customer`, `collect_by`; detail also `allow_substitutions`, `ready_at`, `requires_collection_code` (staff never see the code itself), and items gain the same `id/status/charged_total/substitution` fields as the storefront. `next_statuses` leaves out `ready` while an answer is pending. Events gain `kind` (`status` | `substitution` | `removed` | `code_override` | `payment`; `payment` events don't change the status, so `from_status` = `to_status`, and the note says what happened).
 
 **Admin API addition**: branches get `storefront_url` (used for links in emails).
 
@@ -212,7 +212,7 @@ Order summary and detail gain `awaiting_customer`, `collect_by`; detail also `al
 
 ## Card payments
 
-Card is the only way to pay. Each vendor brings their own Stripe (later Dojo) keys; the total is held at checkout, captured at `ready` and released if the order is cancelled before then. A `ready` order can't be cancelled, so the money is kept; the store can choose to refund part of it. Full plan, data model and checklist: [`backend/docs/payments-guide.md`](payments-guide.md). Built so far: taking a hold, releasing it when an order is rejected, cancelled or not accepted in time, and capturing the total (after substitutions) at `ready`. Store-issued refunds and Stripe are next.
+Card is the only way to pay. Each vendor brings their own Stripe (later Dojo) keys; the total is held at checkout, captured at `ready` and released if the order is cancelled before then. A `ready` order can't be cancelled, so the money is kept; the store can choose to refund part of it. Full plan, data model and checklist: [`backend/docs/payments-guide.md`](payments-guide.md). Built so far: taking a hold, releasing it when an order is rejected, cancelled or not accepted in time, and capturing the total (after substitutions) at `ready`. Store-issued refunds can be requested through the vendor API; the Refund button and Stripe are next.
 
 **Storefront API** (storefront key)
 
@@ -241,6 +241,17 @@ POST /v1/webhooks/{provider}/{account_id}   → 200 once stored (also duplicates
 `authorised` → payment `authorised`, order `awaiting_payment` → `pending` with a fresh `accept_deadline` (history: "Card held £x"). Money held for an order that was already paid or cancelled is queued to be voided.
 
 **Vendor API**: order detail gains `payment` (same shape). Orders that were never paid (`awaiting_payment`, or cancelled with `rejection_reason = "payment_not_completed"`) never appear in vendor lists, detail or the live feed.
+
+```
+POST /v1/vendor/branches/{id}/orders/{orderId}/refunds    (owner, manager)
+  { "amount": 500, "reason": "Damaged item" }      amount in pence
+  → 202 order detail (refund queued; the worker gives the money back a few seconds later)
+  404 order not found (or not in this branch)
+  409 the money hasn't been taken yet (cancel the order instead)
+  422 field amount: 0 or less, or more than is left to refund (refunds still queued count as used)
+  422 field reason: empty
+```
+An order can be refunded more than once, up to what was captured. Each request adds a history event with `kind` `payment` ("Refund of £5.00 requested: Damaged item"); the payment becomes `partially_refunded` or `refunded` when the job finishes.
 
 **Jobs**: unpaid orders are cancelled after `payment_deadline` with `rejection_reason = "payment_not_completed"` (the customer gets an email saying so). When an order with a card hold is rejected or cancelled by a vendor or an admin, or isn't accepted in time, a `void` job is queued in the same transaction as the status change. Marking an order `ready` queues a `capture` of its total the same way. A worker runs the jobs, retrying after 1, 3 and 5 minutes.
 
