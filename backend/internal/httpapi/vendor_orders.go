@@ -80,7 +80,7 @@ type vendorOrderItemResponse struct {
 }
 
 type orderEventResponse struct {
-	Kind       string    `json:"kind"` // status | substitution | removed | code_override
+	Kind       string    `json:"kind"` // status | substitution | removed | code_override | payment
 	FromStatus *string   `json:"from_status"`
 	ToStatus   string    `json:"to_status"`
 	Note       *string   `json:"note"`
@@ -398,6 +398,57 @@ func (s *Server) handleVendorItemUnavailable(w http.ResponseWriter, r *http.Requ
 	}
 	order, err := s.orders.MarkItemUnavailable(r.Context(), in)
 	s.writeItemChange(w, r, order, err)
+}
+
+// POST /orders/{orderID}/refunds - give back part or all of the money taken.
+// The worker does the actual refund, so the answer is 202.
+func (s *Server) handleVendorRefund(w http.ResponseWriter, r *http.Request) {
+	orderID, err := uuid.Parse(chi.URLParam(r, "orderID"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
+
+	var req struct {
+		Amount int64  `json:"amount"`
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	_, err = s.orders.QueueRefund(r.Context(), store.RefundInput{
+		BranchID:    vendorBranchID(r),
+		OrderID:     orderID,
+		Amount:      req.Amount,
+		Reason:      req.Reason,
+		ActorUserID: principalFromContext(r.Context()).User.ID,
+	})
+	switch {
+	case errors.Is(err, store.ErrOrderNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	case errors.Is(err, store.ErrNotCaptured):
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, store.ErrInvalidRefundAmount), errors.Is(err, store.ErrRefundAmountTooLarge):
+		writeIssues(w, err.Error(), []portal.Issue{{Field: "amount", Message: err.Error()}})
+		return
+	case errors.Is(err, store.ErrRefundReasonRequired):
+		writeIssues(w, err.Error(), []portal.Issue{{Field: "reason", Message: err.Error()}})
+		return
+	case err != nil:
+		s.internalError(w, r, err)
+		return
+	}
+
+	row, err := s.queries.GetVendorOrderByBranchAndID(r.Context(), db.GetVendorOrderByBranchAndIDParams{BranchID: vendorBranchID(r), ID: orderID})
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.writeOrderDetail(w, r, http.StatusAccepted, row)
 }
 
 // DELETE /orders/{orderID}/items/{itemID}/substitution - take back an

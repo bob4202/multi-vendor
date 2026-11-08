@@ -192,7 +192,7 @@ func (s *Service) applyAuthorised(ctx context.Context, tx pgx.Tx, p db.Payment, 
 		return err
 	}
 
-	from, note := "awaiting_payment", "Card held "+formatPence(amount)
+	from, note := "awaiting_payment", "Card held "+FormatPence(amount)
 	if err := q.InsertOrderStatusEvent(ctx, db.InsertOrderStatusEventParams{
 		OrderID: order.ID, FromStatus: &from, ToStatus: "pending", Note: &note, Kind: "status",
 	}); err != nil {
@@ -214,6 +214,7 @@ func (s *Service) queueVoid(ctx context.Context, q *db.Queries, paymentID uuid.U
 	return err
 }
 
-func formatPence(p int64) string {
+// FormatPence turns pence into "£5.00" for history notes.
+func FormatPence(p int64) string {
 	return fmt.Sprintf("£%d.%02d", p/100, p%100)
 }

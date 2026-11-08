@@ -33,6 +33,7 @@ const (
 	EditStoreInfo
 	ViewProducts
 	TriggerSync
+	RefundOrders
 )
 
 // permissions is the single source of truth for role capabilities. Owners
@@ -42,6 +43,7 @@ var permissions = map[Role]map[Action]bool{
 		ViewOrders: true, UpdateOrderStatus: true,
 		ViewStoreInfo: true, EditStoreInfo: true,
 		ViewProducts: true, TriggerSync: true,
+		RefundOrders: true,
 	},
 	RoleStaff: {
 		ViewOrders: true, UpdateOrderStatus: true,

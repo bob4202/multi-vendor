@@ -162,6 +162,7 @@ func NewRouter(d Deps) http.Handler {
 					r.With(requirePermission(portal.UpdateOrderStatus)).Post("/orders/{orderID}/status", s.handleVendorChangeOrderStatus)
 					r.With(requirePermission(portal.UpdateOrderStatus)).Post("/orders/{orderID}/items/{itemID}/unavailable", s.handleVendorItemUnavailable)
 					r.With(requirePermission(portal.UpdateOrderStatus)).Delete("/orders/{orderID}/items/{itemID}/substitution", s.handleVendorWithdrawSubstitution)
+					r.With(requirePermission(portal.RefundOrders)).Post("/orders/{orderID}/refunds", s.handleVendorRefund)
 
 					r.With(requirePermission(portal.ViewStoreInfo)).Get("/info", s.handleVendorGetStoreInfo)
 					r.With(requirePermission(portal.EditStoreInfo)).Put("/info", s.handleVendorSaveStoreInfo)
