@@ -224,12 +224,30 @@ func (s *Service) failOrRetry(ctx context.Context, job db.ClaimDuePaymentJobsRow
 	message := jobErr.Error()
 	permanent := isPermanentJobError(jobErr)
 	if giveUp(job.Attempts, jobErr) {
-		s.logger.Error("payment job gave up",
-			"id", job.ID, "kind", job.Kind, "payment_id", job.PaymentID,
-			"attempts", job.Attempts, "permanent", permanent, "error", jobErr)
-		err := s.queries.MarkPaymentJobFailed(ctx, db.MarkPaymentJobFailedParams{LastError: &message, ID: job.ID})
-		if err != nil {
-			s.logger.Error("marking payment job failed", "id", job.ID, "error", err)
+		s.logger.Error(
+			"payment job gave up",
+			"id",
+			job.ID,
+			"kind",
+			job.Kind,
+			"payment_id",
+			job.PaymentID,
+			"attempts",
+			job.Attempts,
+			"permanent",
+			permanent,
+			"error",
+			jobErr,
+		)
+		if job.Kind == "capture" {
+			if err := s.captureGiveUp(ctx, job, message); err != nil {
+				s.logger.Error("capture giveup job failed", "id", job.ID, "payment id", job.PaymentID, "error", err)
+			}
+		} else {
+			err := s.queries.MarkPaymentJobFailed(ctx, db.MarkPaymentJobFailedParams{LastError: &message, ID: job.ID})
+			if err != nil {
+				s.logger.Error("marking payment job failed", "id", job.ID, "error", err)
+			}
 		}
 		return
 	}
@@ -245,6 +263,66 @@ func (s *Service) failOrRetry(ctx context.Context, job db.ClaimDuePaymentJobsRow
 	if err != nil {
 		s.logger.Error("marking payment job for retry", "id", job.ID, "error", err)
 	}
+}
+
+// captureGiveup
+func (s *Service) captureGiveUp(ctx context.Context, job db.ClaimDuePaymentJobsRow, message string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op after Commit
+	q := s.queries.WithTx(tx)
+
+	//lockpayment
+	lockedPayment, err := q.LockPayment(ctx, job.PaymentID)
+	if err != nil {
+		return err
+	}
+
+	err = q.MarkPaymentJobFailed(ctx, db.MarkPaymentJobFailedParams{
+		ID:        job.ID,
+		LastError: &message,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	_, err = q.MarkPaymentCaptureFailed(ctx, db.MarkPaymentCaptureFailedParams{
+		ID:          lockedPayment.ID,
+		FailureCode: nil,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.Commit(ctx); err != nil { // save everything at once
+			return err
+		}
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+	order, err := q.GetOrderByID(ctx, job.OrderID)
+	if err != nil {
+		return err
+	}
+	note := "Couldn't take " + FormatPence(*job.Amount) + " from the card. Don't hand the order over."
+	if err := q.InsertOrderStatusEvent(ctx, db.InsertOrderStatusEventParams{
+		OrderID:    order.ID,
+		FromStatus: &order.Status,
+		ToStatus:   order.Status,
+		Kind:       "payment",
+		Note:       &note,
+	}); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil { // save everything at once
+		return err
+	}
+
+	return nil
 }
 
 // isPermanentJobError: errors that will fail the same way on every retry.

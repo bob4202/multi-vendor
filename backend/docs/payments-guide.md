@@ -325,7 +325,7 @@ stateDiagram-v2
 | Collected, or no-show                     | `completed` / `no_show`                                         | None: already captured; no refund on no-show per terms          | `captured`                        |
 | Cancel after `ready`                      | not allowed                                                     | None: the money is kept; any refund is the store's choice       | `captured`                        |
 | Vendor refunds part of an order           | unchanged                                                       | Queue `refund` (owner/manager only)                             | `partially_refunded` / `refunded` |
-| Capture fails (hold expired, card closed) | `ready` stays                                                   | Mark `capture_failed`; vendor sees "take payment at collection" | `capture_failed`                  |
+| Capture fails (hold expired, card closed) | `ready` stays                                                   | Mark `capture_failed`; handover blocked, vendor sees a warning  | `capture_failed`                  |
 
 Two things to handle on purpose:
 
@@ -517,7 +517,7 @@ Built against the contract above, with mock data until the endpoints are live. N
 | `/orders/[id]`                     | States for `awaiting_payment`: "Confirming payment" after `?payment=return`; "Payment not finished" with "Try again" (new session) after `?payment=cancelled` or a failure; the `payment_deadline` countdown via the existing `Countdown` |
 | `components/order/PriceBreakdown`  | "Card held £24.50", then "Charged £22.10", plus refunds                                                                                                                                                                                   |
 | `/account` "My orders"             | "Payment not finished" badge                                                                                                                                                                                                              |
-| Vendor order list and detail       | Payment status badge; `capture_failed` warning "Take payment at collection"; payment lines in history                                                                                                                                     |
+| Vendor order list and detail       | Payment status badge; `capture_failed` warning "Card couldn't be charged: don't hand over"; payment lines in history                                                                                                                                     |
 | Vendor `RefundDialog`              | Amount (money input helpers), reason; owners and managers only                                                                                                                                                                            |
 | Vendor "Payments" settings page    | Owners pick a provider and paste a key, with the permission list and a link to the provider's keys page. Shows business name, test or live, last 4 and status, plus reconnect and disconnect. Admin vendor detail gets a read-only status |
 | `lib/order-status.ts`              | Label and colour for `awaiting_payment`                                                                                                                                                                                                   |
@@ -553,7 +553,7 @@ Work top to bottom. Each phase ends with something you can test, and the `fake` 
 - [x] B12 Hook `ChangeOrderStatus`, `RejectOrder`, `ExpireOverdue`: queue `capture` at `ready` and `void` on reject/cancel/accept timeout, in the same transaction as the status change. No automatic refund on cancel after `ready`
 - [ ] B13 Early capture for deliveries more than `PAYMENT_CAPTURE_EARLY_DAYS` away (capture at accept, refund the difference at `ready`)
 - [ ] B14 `capture_failed` handling and the vendor warning flag
-- [ ] B15 `POST …/orders/{orderId}/refunds` (owner, manager), with history entry
+- [x] B15 `POST …/orders/{orderId}/refunds` (owner, manager), with history entry
 - [ ] F4 Vendor payment badges, `capture_failed` warning, `RefundDialog`, history lines
 - [ ] F5 Price breakdown: held, charged, refunded
 
