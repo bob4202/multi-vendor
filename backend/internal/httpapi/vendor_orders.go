@@ -249,6 +249,9 @@ func (s *Server) handleVendorChangeOrderStatus(w http.ResponseWriter, r *http.Re
 		errors.Is(err, portal.ErrCollectionCodeLocked):
 		writeIssues(w, err.Error(), []portal.Issue{{Field: "collection_code", Message: err.Error()}})
 		return
+	case errors.Is(err, portal.ErrPaymentNotTaken):
+		writeError(w, http.StatusConflict, err.Error())
+		return
 	case err != nil:
 		s.internalError(w, r, err)
 		return

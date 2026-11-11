@@ -294,8 +294,8 @@ WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: MarkPaymentCaptureFailed :one
--- The hold expired or the card was closed: the vendor sees "take payment
--- at collection".
+-- The capture job gave up (hold expired, card closed, out of retries). The
+-- order can't be handed over while the payment is in this state.
 UPDATE payments
 SET status = 'capture_failed', failure_code = sqlc.narg(failure_code)
 WHERE id = sqlc.arg(id)
