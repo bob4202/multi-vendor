@@ -19,6 +19,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
 import { HandoverDialog } from "@/components/vendor/handover-dialog"
 import { changeOrderStatusAction } from "@/lib/vendor/actions"
+import { isStaleStatus } from "@/lib/vendor/constants"
 import { ORDER_STATUS, reasonRequired } from "@/lib/vendor/order-status"
 import type { OrderStatus } from "@/types/vendor"
 
@@ -72,14 +73,14 @@ function OrderStatusActions({
         setConfirming(null)
         return
       }
-      if (res.status === 409) {
+      if (isStaleStatus(res)) {
         // Someone else moved it first; show them what it is now.
         toast.info("This order was just updated by someone else.")
         setConfirming(null)
         router.refresh()
         return
       }
-      toast.error(res.error)
+      toast.error(sentence(res.error))
     })
   }
 
@@ -197,3 +198,8 @@ function OrderStatusActions({
 }
 
 export { OrderStatusActions }
+
+// API messages start lower-case; toasts read as sentences.
+function sentence(message: string) {
+  return message.charAt(0).toUpperCase() + message.slice(1)
+}

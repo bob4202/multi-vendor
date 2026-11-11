@@ -13,3 +13,12 @@ export function safeVendorRedirect(next: string | null | undefined) {
   }
   return next
 }
+
+// The API answers 409 for several reasons on a status change. Only this one
+// means "someone else moved the order first"; the others (card couldn't be
+// charged, accept window closed) carry a message the shop must see.
+const STALE_STATUS_ERROR = "order status has changed since it was loaded"
+
+export function isStaleStatus(res: { status?: number; error: string }) {
+  return res.status === 409 && res.error === STALE_STATUS_ERROR
+}

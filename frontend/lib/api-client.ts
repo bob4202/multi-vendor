@@ -25,8 +25,10 @@ export class ApiError extends Error {
 export interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
   body?: unknown
-  // Defaults to the session cookie. Pass null for unauthenticated calls
-  // (login, invites), which also get their 401s as errors, not redirects.
+  // Defaults to the session cookie, and a 401 then redirects to login. Pass
+  // a token yourself (session checks, logout) or null for unauthenticated
+  // calls (login, invites) to get 401s as ApiError instead: the login page
+  // checks the session itself, so a redirect there would loop.
   token?: string | null
   headers?: HeadersInit
 }
@@ -59,8 +61,9 @@ export function createApiClient({
       cache: "no-store",
     })
 
-    // An expired or revoked session mid-visit: back to login.
-    if (res.status === 401 && token !== null) {
+    // An expired or revoked session mid-visit: back to login. Only for the
+    // cookie's token; callers passing their own handle the 401.
+    if (res.status === 401 && token === undefined) {
       redirect(`${loginPath}?expired=1`)
     }
     if (res.status === 204) {
