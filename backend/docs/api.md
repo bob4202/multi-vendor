@@ -251,9 +251,14 @@ POST /v1/vendor/branches/{id}/orders/{orderId}/refunds    (owner, manager)
   422 field amount: 0 or less, or more than is left to refund (refunds still queued count as used)
   422 field reason: empty
 ```
+```
+POST /v1/vendor/branches/{id}/orders/{orderId}/status
+  409 "the card couldn't be charged for this order - don't hand it over"
+      (status completed or out_for_delivery while the payment is capture_failed; no_show is still allowed)
+```
 An order can be refunded more than once, up to what was captured. Each request adds a history event with `kind` `payment` ("Refund of £5.00 requested: Damaged item"); the payment becomes `partially_refunded` or `refunded` when the job finishes.
 
-**Jobs**: unpaid orders are cancelled after `payment_deadline` with `rejection_reason = "payment_not_completed"` (the customer gets an email saying so). When an order with a card hold is rejected or cancelled by a vendor or an admin, or isn't accepted in time, a `void` job is queued in the same transaction as the status change. Marking an order `ready` queues a `capture` of its total the same way. A worker runs the jobs, retrying after 1, 3 and 5 minutes.
+**Jobs**: unpaid orders are cancelled after `payment_deadline` with `rejection_reason = "payment_not_completed"` (the customer gets an email saying so). When an order with a card hold is rejected or cancelled by a vendor or an admin, or isn't accepted in time, a `void` job is queued in the same transaction as the status change. Marking an order `ready` queues a `capture` of its total the same way. A worker runs the jobs, retrying after 1, 3 and 5 minutes. If a `capture` gives up (the hold expired or the card was closed, or it ran out of retries), the job is marked `failed`, the payment `capture_failed` and the history gets a `payment` line ("Couldn't take £x from the card. Don't hand the order over."), all in one transaction. The order stays `ready` and can't be handed over; what happens next is still to be decided (PAY-20).
 
 **Local development**: `PAYMENT_PROVIDERS=fake` in `backend/.env`. `make seed` gives every vendor an active `fake` account. The fake payment page lives on the API at `/fake-pay/{ref}` (only routed when `fake` is enabled); Pay and Decline send a signed webhook through the real webhook route.
 

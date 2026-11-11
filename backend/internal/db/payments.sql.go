@@ -1411,8 +1411,8 @@ type MarkPaymentCaptureFailedParams struct {
 	ID          uuid.UUID `json:"id"`
 }
 
-// The hold expired or the card was closed: the vendor sees "take payment
-// at collection".
+// The capture job gave up (hold expired, card closed, out of retries). The
+// order can't be handed over while the payment is in this state.
 func (q *Queries) MarkPaymentCaptureFailed(ctx context.Context, arg MarkPaymentCaptureFailedParams) (Payment, error) {
 	row := q.db.QueryRow(ctx, markPaymentCaptureFailed, arg.FailureCode, arg.ID)
 	var i Payment

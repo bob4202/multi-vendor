@@ -224,24 +224,12 @@ func (s *Service) failOrRetry(ctx context.Context, job db.ClaimDuePaymentJobsRow
 	message := jobErr.Error()
 	permanent := isPermanentJobError(jobErr)
 	if giveUp(job.Attempts, jobErr) {
-		s.logger.Error(
-			"payment job gave up",
-			"id",
-			job.ID,
-			"kind",
-			job.Kind,
-			"payment_id",
-			job.PaymentID,
-			"attempts",
-			job.Attempts,
-			"permanent",
-			permanent,
-			"error",
-			jobErr,
-		)
+		s.logger.Error("payment job gave up",
+			"id", job.ID, "kind", job.Kind, "payment_id", job.PaymentID,
+			"attempts", job.Attempts, "permanent", permanent, "error", jobErr)
 		if job.Kind == "capture" {
 			if err := s.captureGiveUp(ctx, job, message); err != nil {
-				s.logger.Error("capture giveup job failed", "id", job.ID, "payment id", job.PaymentID, "error", err)
+				s.logger.Error("marking capture failed", "id", job.ID, "payment_id", job.PaymentID, "error", err)
 			}
 		} else {
 			err := s.queries.MarkPaymentJobFailed(ctx, db.MarkPaymentJobFailedParams{LastError: &message, ID: job.ID})
@@ -265,7 +253,11 @@ func (s *Service) failOrRetry(ctx context.Context, job db.ClaimDuePaymentJobsRow
 	}
 }
 
-// captureGiveup
+// captureGiveUp handles a capture job that stopped for good: the job is
+// marked failed, the payment capture_failed and the order history gets a
+// "payment" line, all in one transaction so none of it can be half saved.
+// A payment that isn't authorised any more (a webhook got there first) only
+// has its job marked failed.
 func (s *Service) captureGiveUp(ctx context.Context, job db.ClaimDuePaymentJobsRow, message string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -274,7 +266,7 @@ func (s *Service) captureGiveUp(ctx context.Context, job db.ClaimDuePaymentJobsR
 	defer tx.Rollback(ctx) // no-op after Commit
 	q := s.queries.WithTx(tx)
 
-	//lockpayment
+	// Same lock as webhooks and other job results.
 	lockedPayment, err := q.LockPayment(ctx, job.PaymentID)
 	if err != nil {
 		return err
@@ -294,10 +286,7 @@ func (s *Service) captureGiveUp(ctx context.Context, job db.ClaimDuePaymentJobsR
 		FailureCode: nil,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		if err := tx.Commit(ctx); err != nil { // save everything at once
-			return err
-		}
-		return nil
+		return tx.Commit(ctx)
 	}
 
 	if err != nil {
