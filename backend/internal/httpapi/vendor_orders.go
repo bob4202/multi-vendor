@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -38,6 +39,7 @@ type vendorOrderSummaryResponse struct {
 	ID             string                  `json:"id"`
 	Reference      string                  `json:"reference"`
 	Status         string                  `json:"status"`
+	Payment        *paymentResponse        `json:"payment"`
 	Fulfilment     orderFulfilmentResponse `json:"fulfilment"`
 	Customer       orderCustomerResponse   `json:"customer"`
 	ItemCount      int32                   `json:"item_count"`
@@ -50,11 +52,12 @@ type vendorOrderSummaryResponse struct {
 	CollectBy *time.Time `json:"collect_by"`
 }
 
-func toVendorOrderSummary(o db.Order, itemCount int32, awaiting bool) vendorOrderSummaryResponse {
+func toVendorOrderSummary(o db.Order, itemCount int32, awaiting bool, payment *store.Payment) vendorOrderSummaryResponse {
 	return vendorOrderSummaryResponse{
 		ID:               o.ID.String(),
 		Reference:        o.Reference,
 		Status:           o.Status,
+		Payment:          toPaymentResponse(payment),
 		Fulfilment:       orderFulfilmentResponse{Type: o.FulfilmentType, Date: o.FulfilmentDate.Time.Format(time.DateOnly)},
 		Customer:         orderCustomerResponse{Name: o.CustomerName, Email: o.CustomerEmail, Phone: o.CustomerPhone},
 		ItemCount:        itemCount,
@@ -163,10 +166,19 @@ func (s *Server) handleVendorListOrders(w http.ResponseWriter, r *http.Request) 
 		s.internalError(w, r, err)
 		return
 	}
+	orderIDs := make([]uuid.UUID, 0, len(rows))
+	for _, o := range rows {
+		orderIDs = append(orderIDs, o.ID)
+	}
+	paymentByOrder, err := s.paymentsByOrder(r.Context(), orderIDs)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 
 	data := make([]vendorOrderSummaryResponse, 0, len(rows))
 	for _, o := range rows {
-		data = append(data, toVendorOrderSummary(vendorRowOrder(o), o.ItemCount, o.AwaitingCustomer))
+		data = append(data, toVendorOrderSummary(vendorRowOrder(o), o.ItemCount, o.AwaitingCustomer, paymentByOrder[o.ID]))
 	}
 
 	writeJSON(w, http.StatusOK, paginatedVendorOrdersResponse{
@@ -359,6 +371,16 @@ func (s *Server) handleVendorLookupOrder(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "no open order has that code")
 		return
 	}
+	orderIDs := make([]uuid.UUID, 0, len(rows))
+	for _, o := range rows {
+		orderIDs = append(orderIDs, o.ID)
+	}
+	paymentByOrder, err := s.paymentsByOrder(r.Context(), orderIDs)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+
 	data := make([]vendorOrderSummaryResponse, 0, len(rows))
 	for _, o := range rows {
 		data = append(data, toVendorOrderSummary(db.Order{
@@ -366,11 +388,32 @@ func (s *Server) handleVendorLookupOrder(w http.ResponseWriter, r *http.Request)
 			FulfilmentDate: o.FulfilmentDate, CustomerName: o.CustomerName, CustomerEmail: o.CustomerEmail,
 			CustomerPhone: o.CustomerPhone, Total: o.Total, CreatedAt: o.CreatedAt,
 			AcceptDeadline: o.AcceptDeadline, CollectBy: o.CollectBy,
-		}, o.ItemCount, o.AwaitingCustomer))
+		}, o.ItemCount, o.AwaitingCustomer, paymentByOrder[o.ID]))
 	}
 	// Codes are random, so two open orders sharing one is rare - but if it
 	// happens, staff pick by name.
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+// paymentsByOrder loads the latest payment of each order in one query (a
+// page can hold 50 orders, and the live list refreshes often). Orders with
+// no payment aren't in the map, so a lookup gives nil, which is JSON null.
+func (s *Server) paymentsByOrder(ctx context.Context, orderIDs []uuid.UUID) (map[uuid.UUID]*store.Payment, error) {
+	byOrder := make(map[uuid.UUID]*store.Payment, len(orderIDs))
+	if len(orderIDs) == 0 {
+		return byOrder, nil
+	}
+	rows, err := s.queries.ListLatestPaymentsByOrderIDs(ctx, orderIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range rows {
+		byOrder[p.OrderID] = &store.Payment{
+			Status: p.Status, AmountAuthorised: p.AmountAuthorised,
+			AmountCaptured: p.AmountCaptured, AmountRefunded: p.AmountRefunded,
+		}
+	}
+	return byOrder, nil
 }
 
 // POST /orders/{orderID}/items/{itemID}/unavailable

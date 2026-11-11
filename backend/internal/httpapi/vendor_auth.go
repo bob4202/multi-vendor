@@ -117,6 +117,7 @@ type permissionsResponse struct {
 	UpdateOrderStatus bool `json:"update_order_status"`
 	EditStoreInfo     bool `json:"edit_store_info"`
 	TriggerSync       bool `json:"trigger_sync"`
+	RefundOrders      bool `json:"refund_orders"`
 }
 
 type loginResponse struct {
@@ -203,6 +204,7 @@ func (s *Server) handleVendorMe(w http.ResponseWriter, r *http.Request) {
 			UpdateOrderStatus: p.Can(portal.UpdateOrderStatus),
 			EditStoreInfo:     p.Can(portal.EditStoreInfo),
 			TriggerSync:       p.Can(portal.TriggerSync),
+			RefundOrders:      p.Can(portal.RefundOrders),
 		},
 	})
 }
