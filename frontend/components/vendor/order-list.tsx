@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ChevronRight, Hourglass } from "lucide-react"
+import { ChevronRight, CreditCard, Hourglass } from "lucide-react"
 
 import { Price } from "@/components/common/price"
 import {
@@ -14,6 +14,7 @@ import { AcceptCountdown } from "@/components/vendor/accept-countdown"
 import { CollectByBadge } from "@/components/vendor/collect-by-badge"
 import { FulfilmentLabel } from "@/components/vendor/fulfilment-label"
 import { OrderStatusBadge } from "@/components/vendor/order-status-badge"
+import { PaymentStatusBadge } from "@/components/vendor/payment-status-badge"
 import { formatDateTime } from "@/lib/format"
 import type { OrderSummary } from "@/types/vendor"
 
@@ -125,10 +126,21 @@ function OrderList({
 export { OrderList }
 
 // What needs attention on an order: time left to accept, a substitute the
-// customer hasn't answered, or when a ready order must be collected.
+// customer hasn't answered, when a ready order must be collected, a card
+// that couldn't be charged, or money given back.
 function OrderFlags({ order }: { order: OrderSummary }) {
+  const payment = order.payment?.status
   return (
     <>
+      {payment === "capture_failed" && (
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
+          <CreditCard className="size-3.5" />
+          Card not charged
+        </span>
+      )}
+      {(payment === "partially_refunded" || payment === "refunded") && (
+        <PaymentStatusBadge status={payment} />
+      )}
       {order.status === "pending" && (
         <AcceptCountdown deadline={order.accept_deadline} />
       )}

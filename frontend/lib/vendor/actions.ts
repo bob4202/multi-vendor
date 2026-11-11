@@ -132,6 +132,17 @@ export async function withdrawSubstitutionAction(
   })
 }
 
+export async function refundOrderAction(
+  branchId: string,
+  orderId: string,
+  amount: number,
+  reason: string
+) {
+  return runAction(async () => {
+    await vendorAPI.refundOrder(branchId, orderId, { amount, reason })
+  })
+}
+
 // Product search for the substitute picker (first page of matches).
 export async function searchProductsAction(branchId: string, search: string) {
   return runAction(
