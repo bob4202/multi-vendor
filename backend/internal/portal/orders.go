@@ -107,6 +107,9 @@ var (
 	// ErrCollectionCodeLocked: too many wrong codes; only an override with a
 	// reason works now.
 	ErrCollectionCodeLocked = errors.New("too many wrong codes - hand over with a reason instead (e.g. checked ID)")
+	// ErrPaymentNotTaken: the capture failed, so the order can't be handed
+	// over (409).
+	ErrPaymentNotTaken = errors.New("the card couldn't be charged for this order - don't hand it over")
 )
 
 // maxCollectionCodeAttempts wrong codes lock code entry for that order.
@@ -173,6 +176,18 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 	}
 	if acceptWindowClosed(current, in.NewStatus, s.now()) {
 		return db.Order{}, ErrAcceptWindowClosed
+	}
+
+	// Don't let unpaid shopping leave the shop. No payment row (orders from
+	// before card payments) is fine.
+	if in.NewStatus == StatusCompleted || in.NewStatus == StatusOutForDelivery {
+		latestPayment, err := q.GetLatestPaymentForOrder(ctx, in.OrderID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return db.Order{}, fmt.Errorf("load latest payment: %w", err)
+		}
+		if err == nil && blocksHandover(in.NewStatus, latestPayment.Status) {
+			return db.Order{}, ErrPaymentNotTaken
+		}
 	}
 
 	params := db.TransitionOrderStatusParams{
@@ -308,4 +323,12 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 func acceptWindowClosed(o db.Order, newStatus string, now time.Time) bool {
 	return o.Status == StatusPending && newStatus == StatusAccepted &&
 		o.AcceptDeadline.Valid && !o.AcceptDeadline.Time.After(now)
+}
+
+// blocksHandover: the shopping can't leave the shop (collected or out for
+// delivery) once taking the money has failed. A capture that's still queued
+// doesn't block: the worker usually takes the money within seconds.
+func blocksHandover(newStatus, paymentStatus string) bool {
+	handover := newStatus == StatusCompleted || newStatus == StatusOutForDelivery
+	return handover && paymentStatus == "capture_failed"
 }
