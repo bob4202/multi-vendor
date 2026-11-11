@@ -153,6 +153,17 @@ export const vendorAPI = {
       { method: "DELETE" }
     ),
 
+  // Owners and managers. 202: the worker gives the money back shortly.
+  refundOrder: (
+    branchId: string,
+    orderId: string,
+    body: { amount: number; reason: string }
+  ) =>
+    vendorFetch<OrderDetail>(
+      branchPath(branchId, `/orders/${encodeURIComponent(orderId)}/refunds`),
+      { method: "POST", body }
+    ),
+
   getStoreInfo: (branchId: string) =>
     vendorFetch<StoreInfo & { name: string }>(branchPath(branchId, "/info")),
 

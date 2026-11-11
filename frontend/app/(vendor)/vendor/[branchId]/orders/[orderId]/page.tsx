@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { AcceptCountdown } from "@/components/vendor/accept-countdown"
+import { CaptureFailedAlert } from "@/components/vendor/capture-failed-alert"
 import { LiveOrders } from "@/components/vendor/live-orders"
 import { CollectByBadge } from "@/components/vendor/collect-by-badge"
 import { FulfilmentLabel } from "@/components/vendor/fulfilment-label"
@@ -15,9 +16,11 @@ import { OrderItems } from "@/components/vendor/order-items"
 import { OrderStatusActions } from "@/components/vendor/order-status-actions"
 import { OrderStatusBadge } from "@/components/vendor/order-status-badge"
 import { OrderTimeline } from "@/components/vendor/order-timeline"
+import { PaymentCard } from "@/components/vendor/payment-card"
 import { PageHeader } from "@/components/common/page-header"
 import { formatDateTime } from "@/lib/format"
 import { vendorAPI } from "@/lib/vendor/api"
+import { handoverBlocked } from "@/lib/vendor/payment-status"
 import { requireBranch } from "@/lib/vendor/session"
 
 export const metadata: Metadata = { title: "Order" }
@@ -61,6 +64,19 @@ export default async function OrderPage({ params, searchParams }: Props) {
     )
   }
 
+  // The card couldn't be charged: hide the handover steps (the API refuses
+  // them too). Ending the order, e.g. as a no-show, still works.
+  const blocked = handoverBlocked(order.payment)
+  const nextStatuses = blocked
+    ? order.next_statuses.filter(
+        (s) => s !== "completed" && s !== "out_for_delivery"
+      )
+    : order.next_statuses
+  // Owners and managers. Until /me sends refund_orders, fall back to the
+  // role; the API enforces it either way.
+  const canRefund =
+    session.permissions.refund_orders ?? session.user.role !== "staff"
+
   return (
     <>
       {back}
@@ -91,13 +107,15 @@ export default async function OrderPage({ params, searchParams }: Props) {
               orderId={order.id}
               reference={order.reference}
               status={order.status}
-              nextStatuses={order.next_statuses}
+              nextStatuses={nextStatuses}
               requiresCollectionCode={order.requires_collection_code}
               initialCode={code && /^\d{6}$/.test(code) ? code : undefined}
             />
           )
         }
       />
+
+      {blocked && <CaptureFailedAlert amount={order.total} />}
 
       {order.awaiting_customer && (
         <div className="mb-4 flex animate-in items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm fade-in-0">
@@ -160,13 +178,6 @@ export default async function OrderPage({ params, searchParams }: Props) {
                   that&apos;s out of stock.
                 </p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Payment on{" "}
-                {order.fulfilment.type === "delivery"
-                  ? "delivery"
-                  : "collection"}
-                .
-              </p>
             </CardContent>
           </Card>
 
@@ -253,6 +264,16 @@ export default async function OrderPage({ params, searchParams }: Props) {
               )}
             </CardContent>
           </Card>
+
+          {order.payment && (
+            <PaymentCard
+              payment={order.payment}
+              branchId={branchId}
+              orderId={order.id}
+              reference={order.reference}
+              canRefund={canRefund}
+            />
+          )}
 
           <Card>
             <CardHeader>

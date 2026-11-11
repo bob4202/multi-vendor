@@ -552,9 +552,9 @@ Work top to bottom. Each phase ends with something you can test, and the `fake` 
 - [x] B11 `payment_jobs` worker (claim with `SKIP LOCKED`, backoff, `last_error`), started next to the outbox worker
 - [x] B12 Hook `ChangeOrderStatus`, `RejectOrder`, `ExpireOverdue`: queue `capture` at `ready` and `void` on reject/cancel/accept timeout, in the same transaction as the status change. No automatic refund on cancel after `ready`
 - [ ] B13 Early capture for deliveries more than `PAYMENT_CAPTURE_EARLY_DAYS` away (capture at accept, refund the difference at `ready`)
-- [ ] B14 `capture_failed` handling and the vendor warning flag
+- [x] B14 `capture_failed` handling and the vendor warning flag
 - [x] B15 `POST …/orders/{orderId}/refunds` (owner, manager), with history entry
-- [ ] F4 Vendor payment badges, `capture_failed` warning, `RefundDialog`, history lines
+- [x] F4 Vendor payment card and badges, `capture_failed` warning, `RefundDialog`, history lines. List badges light up once the list sends `payment` (PAY-21)
 - [ ] F5 Price breakdown: held, charged, refunded
 
 ### Phase 4: Stripe

@@ -8,6 +8,7 @@ const KIND_TITLE: Record<Exclude<OrderEvent["kind"], "status">, string> = {
   substitution: "Substitution",
   removed: "Item removed",
   code_override: "Handed over without the code",
+  payment: "Payment",
 }
 
 // The order's audit trail: when it was placed, then every status change

@@ -58,6 +58,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 - Owners, managers and staff with their own logins and roles
 - Live order queue with accept countdown and new-order sound; status changes with full history
 - Collection hand-over by code, substitutions, automatic no-shows
+- Card payment status on each order, refunds (owners and managers), and a block on handing over an order whose card couldn't be charged
 - Store details, opening hours and closures; products with inventory sync status and "Sync now"
 
 **Platform admin** (`/admin`)
@@ -80,7 +81,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 
 ## Roadmap
 
-- **Card payments:** store-issued refunds, then Stripe (see the payments guide)
+- **Card payments:** what happens after a card can't be charged (pay again or cancel), early capture for far-off deliveries, then Stripe (see the payments guide)
 - Vendors marking products as featured
 - User management: adding, removing and disabling staff, changing roles; password reset by email
 - Support for more inventory systems
