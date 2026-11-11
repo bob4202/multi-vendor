@@ -102,7 +102,7 @@ The Next server keeps the token in an httpOnly `vendor_session` cookie (path `/v
 
 ```
 POST /v1/vendor/auth/login                    POST /v1/vendor/auth/logout
-GET  /v1/vendor/me                            → { user, vendor, branches[], permissions{update_order_status, edit_store_info, trigger_sync} }
+GET  /v1/vendor/me                            → { user, vendor, branches[], permissions{update_order_status, edit_store_info, trigger_sync, refund_orders} }
 
 GET  /v1/vendor/branches/{id}/orders?status=active|done|all&page&page_size
 GET  /v1/vendor/branches/{id}/orders/{orderId}          → order + items + events[] + next_statuses[]
@@ -240,7 +240,7 @@ POST /v1/webhooks/{provider}/{account_id}   → 200 once stored (also duplicates
 ```
 `authorised` → payment `authorised`, order `awaiting_payment` → `pending` with a fresh `accept_deadline` (history: "Card held £x"). Money held for an order that was already paid or cancelled is queued to be voided.
 
-**Vendor API**: order detail gains `payment` (same shape). Orders that were never paid (`awaiting_payment`, or cancelled with `rejection_reason = "payment_not_completed"`) never appear in vendor lists, detail or the live feed.
+**Vendor API**: order detail, the order list and lookup by code gain `payment` (same shape; `null` for orders from before card payments). `/me` permissions gain `refund_orders` (owners and managers). Orders that were never paid (`awaiting_payment`, or cancelled with `rejection_reason = "payment_not_completed"`) never appear in vendor lists, detail or the live feed.
 
 ```
 POST /v1/vendor/branches/{id}/orders/{orderId}/refunds    (owner, manager)
