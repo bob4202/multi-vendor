@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/input-otp"
 import { Textarea } from "@/components/ui/textarea"
 import { changeOrderStatusAction } from "@/lib/vendor/actions"
+import { isStaleStatus } from "@/lib/vendor/constants"
 
 // Handing a collection order over: staff type the code the customer shows.
 // Without it, they can still hand over with a reason (e.g. "checked ID"),
@@ -73,7 +74,7 @@ function HandoverDialog({
         onOpenChange(false)
         return
       }
-      if (res.status === 409) {
+      if (isStaleStatus(res)) {
         toast.info("This order was just updated by someone else.")
         onOpenChange(false)
         router.refresh()
