@@ -1,6 +1,37 @@
 package portal
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"ecommerce/backend/internal/db"
+)
+
+// A ready order can only be cancelled after the charge failed; every other
+// status keeps its normal list.
+func TestNextStatusesFor(t *testing.T) {
+	tests := []struct {
+		name               string
+		status, fulfilment string
+		awaitingCustomer   bool
+		paymentStatus      string
+		want               []string
+	}{
+		{"ready, charged", StatusReady, "delivery", false, "captured", []string{StatusOutForDelivery}},
+		{"ready, no payment (old order)", StatusReady, "delivery", false, "", []string{StatusOutForDelivery}},
+		{"picking, held", StatusPicking, "collection", false, "authorised", []string{StatusReady, StatusCancelled}},
+		{"picking, waiting on a substitution", StatusPicking, "collection", true, "authorised", []string{StatusCancelled}},
+		{"ready, charge failed", StatusReady, "delivery", false, "capture_failed", []string{StatusCancelled}},
+		{"ready collection, charge failed", StatusReady, "collection", false, "capture_failed", []string{StatusNoShow, StatusCancelled}},
+	}
+	for _, tt := range tests {
+		o := db.Order{Status: tt.status, FulfilmentType: tt.fulfilment}
+		got := NextStatusesFor(o, tt.awaitingCustomer, tt.paymentStatus)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s: NextStatusesFor = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
 
 func TestBlocksHandover(t *testing.T) {
 	tests := []struct {

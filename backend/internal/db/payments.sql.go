@@ -1614,6 +1614,45 @@ func (q *Queries) MarkPaymentJobRetry(ctx context.Context, arg MarkPaymentJobRet
 	return err
 }
 
+const markPaymentRetrying = `-- name: MarkPaymentRetrying :one
+UPDATE payments
+SET status = 'authorised', failure_code = NULL
+WHERE id = $1
+  AND status = 'capture_failed'
+RETURNING id, order_id, branch_id, provider, payment_account_id, provider_ref, payment_ref, redirect_url, expires_at, status, failure_code, currency, amount_authorised, amount_captured, amount_refunded, authorised_at, captured_at, voided_at, created_at, updated_at
+`
+
+// The shop asked to try the charge again: back to authorised so a new capture
+// job can run, and so a second failure marks it capture_failed again.
+// No rows = it isn't capture_failed (already retrying, or charged).
+func (q *Queries) MarkPaymentRetrying(ctx context.Context, id uuid.UUID) (Payment, error) {
+	row := q.db.QueryRow(ctx, markPaymentRetrying, id)
+	var i Payment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.BranchID,
+		&i.Provider,
+		&i.PaymentAccountID,
+		&i.ProviderRef,
+		&i.PaymentRef,
+		&i.RedirectUrl,
+		&i.ExpiresAt,
+		&i.Status,
+		&i.FailureCode,
+		&i.Currency,
+		&i.AmountAuthorised,
+		&i.AmountCaptured,
+		&i.AmountRefunded,
+		&i.AuthorisedAt,
+		&i.CapturedAt,
+		&i.VoidedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markPaymentVoided = `-- name: MarkPaymentVoided :one
 UPDATE payments
 SET status = 'voided', voided_at = coalesce(voided_at, now())

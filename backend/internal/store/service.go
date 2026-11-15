@@ -677,7 +677,8 @@ func (s *Service) RejectOrder(ctx context.Context, branchID, orderID uuid.UUID, 
 }
 
 // QueueVoidIfHeld queues a void to release the customer's card hold, if the
-// order's latest payment is still held. Pass the q of the transaction that
+// order's latest payment is still held: authorised, or capture_failed (taking
+// the money failed, but the hold may still be there). Pass the q of the transaction that
 // changes the order, so the job exists only if the change is saved. An empty
 // actor means the system or an admin key did it, not a vendor user.
 func QueueVoidIfHeld(ctx context.Context, q *db.Queries, orderID uuid.UUID, actor pgtype.UUID) error {
@@ -689,7 +690,7 @@ func QueueVoidIfHeld(ctx context.Context, q *db.Queries, orderID uuid.UUID, acto
 	if err != nil {
 		return fmt.Errorf("load payment: %w", err)
 	}
-	if payment.Status != "authorised" {
+	if payment.Status != "authorised" && payment.Status != "capture_failed" {
 		return nil
 	}
 	_, err = q.EnqueuePaymentJob(ctx, db.EnqueuePaymentJobParams{

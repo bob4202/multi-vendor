@@ -56,6 +56,7 @@ var transitions = map[string][]transition{
 		{to: StatusCompleted, onlyFor: "collection"},
 		{to: StatusNoShow, onlyFor: "collection"},
 		{to: StatusOutForDelivery, onlyFor: "delivery"},
+		{to: StatusCancelled},
 	},
 	StatusOutForDelivery: {
 		{to: StatusCompleted},
@@ -110,23 +111,35 @@ var (
 	// ErrPaymentNotTaken: the capture failed, so the order can't be handed
 	// over (409).
 	ErrPaymentNotTaken = errors.New("the card couldn't be charged for this order - don't hand it over")
+	// ErrCannotCancelThisOrder: a ready order can only be cancelled after
+	// its charge failed; otherwise the money is taken, so refund it (409).
+	ErrCannotCancelThisOrder = errors.New("this order has been charged, so it can't be cancelled - refund it instead")
 )
 
 // maxCollectionCodeAttempts wrong codes lock code entry for that order.
 const maxCollectionCodeAttempts = 5
 
 // NextStatusesFor is NextStatuses for a loaded order: "ready" is held back
-// while the customer still has to answer a substitution.
-func NextStatusesFor(o db.Order, awaitingCustomer bool) []string {
+// while the customer still has to answer a substitution, and a ready order
+// whose charge failed (paymentStatus capture_failed) can be cancelled but not
+// handed over. paymentStatus is "" for orders without a payment.
+func NextStatusesFor(o db.Order, awaitingCustomer bool, paymentStatus string) []string {
 	next := NextStatuses(o.Status, o.FulfilmentType)
-	if !awaitingCustomer {
-		return next
-	}
+
+	hideCancel := o.Status == StatusReady && paymentStatus != "capture_failed"
+	hideHandover := o.Status == StatusReady && paymentStatus == "capture_failed"
 	out := next[:0:0]
 	for _, s := range next {
-		if s != StatusReady {
-			out = append(out, s)
+		if s == StatusReady && awaitingCustomer {
+			continue
 		}
+		if hideCancel && s == StatusCancelled {
+			continue
+		}
+		if hideHandover && (s == StatusOutForDelivery || s == StatusCompleted) {
+			continue
+		}
+		out = append(out, s)
 	}
 	return out
 }
@@ -243,6 +256,17 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 				return db.Order{}, fmt.Errorf("record code attempt: %w", err)
 			}
 			return db.Order{}, ErrCollectionCodeWrong
+		}
+	}
+	// A ready order can only be cancelled after its charge failed. No
+	// payment row (an order from before card payments) can't be either.
+	if in.NewStatus == StatusCancelled && current.Status == StatusReady {
+		latestPayment, err := q.GetLatestPaymentForOrder(ctx, in.OrderID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return db.Order{}, fmt.Errorf("load latest payment: %w", err)
+		}
+		if latestPayment.Status != "capture_failed" {
+			return db.Order{}, ErrCannotCancelThisOrder
 		}
 	}
 

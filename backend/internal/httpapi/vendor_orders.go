@@ -261,7 +261,7 @@ func (s *Server) handleVendorChangeOrderStatus(w http.ResponseWriter, r *http.Re
 		errors.Is(err, portal.ErrCollectionCodeLocked):
 		writeIssues(w, err.Error(), []portal.Issue{{Field: "collection_code", Message: err.Error()}})
 		return
-	case errors.Is(err, portal.ErrPaymentNotTaken):
+	case errors.Is(err, portal.ErrPaymentNotTaken), errors.Is(err, portal.ErrCannotCancelThisOrder):
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
@@ -283,11 +283,16 @@ func (s *Server) writeOrderDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
+	paymentStatus := ""
+	if full.Payment != nil {
+		paymentStatus = full.Payment.Status
+	}
+
 	resp := vendorOrderDetailResponse{
 		ID:              o.ID.String(),
 		Reference:       o.Reference,
 		Status:          o.Status,
-		NextStatuses:    portal.NextStatusesFor(o, full.AwaitingCustomer()),
+		NextStatuses:    portal.NextStatusesFor(o, full.AwaitingCustomer(), paymentStatus),
 		Fulfilment:      orderFulfilmentResponse{Type: o.FulfilmentType, Date: o.FulfilmentDate.Time.Format(time.DateOnly)},
 		Customer:        orderCustomerResponse{Name: o.CustomerName, Email: o.CustomerEmail, Phone: o.CustomerPhone},
 		Notes:           o.Notes,
@@ -483,6 +488,39 @@ func (s *Server) handleVendorRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, store.ErrRefundReasonRequired):
 		writeIssues(w, err.Error(), []portal.Issue{{Field: "reason", Message: err.Error()}})
+		return
+	case err != nil:
+		s.internalError(w, r, err)
+		return
+	}
+
+	row, err := s.queries.GetVendorOrderByBranchAndID(r.Context(), db.GetVendorOrderByBranchAndIDParams{BranchID: vendorBranchID(r), ID: orderID})
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.writeOrderDetail(w, r, http.StatusAccepted, row)
+}
+
+// POST /orders/{orderID}/payment/retry - ask the worker to try again to take the money.
+func (s *Server) handleVendorRetryCharge(w http.ResponseWriter, r *http.Request) {
+	orderID, err := uuid.Parse(chi.URLParam(r, "orderID"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
+
+	_, err = s.orders.QueueRetry(r.Context(), store.RetryPaymentInput{
+		BranchID:    vendorBranchID(r),
+		OrderID:     orderID,
+		ActorUserID: principalFromContext(r.Context()).User.ID,
+	})
+	switch {
+	case errors.Is(err, store.ErrOrderNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	case errors.Is(err, store.ErrNothingToRetry):
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
 		s.internalError(w, r, err)
