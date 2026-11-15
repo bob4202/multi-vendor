@@ -261,7 +261,7 @@ func (s *Server) handleVendorChangeOrderStatus(w http.ResponseWriter, r *http.Re
 		errors.Is(err, portal.ErrCollectionCodeLocked):
 		writeIssues(w, err.Error(), []portal.Issue{{Field: "collection_code", Message: err.Error()}})
 		return
-	case errors.Is(err, portal.ErrPaymentNotTaken):
+	case errors.Is(err, portal.ErrPaymentNotTaken), errors.Is(err, portal.ErrCannotCancelThisOrder):
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
@@ -283,11 +283,16 @@ func (s *Server) writeOrderDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
+	paymentStatus := ""
+	if full.Payment != nil {
+		paymentStatus = full.Payment.Status
+	}
+
 	resp := vendorOrderDetailResponse{
 		ID:              o.ID.String(),
 		Reference:       o.Reference,
 		Status:          o.Status,
-		NextStatuses:    portal.NextStatusesFor(o, full.AwaitingCustomer()),
+		NextStatuses:    portal.NextStatusesFor(o, full.AwaitingCustomer(), paymentStatus),
 		Fulfilment:      orderFulfilmentResponse{Type: o.FulfilmentType, Date: o.FulfilmentDate.Time.Format(time.DateOnly)},
 		Customer:        orderCustomerResponse{Name: o.CustomerName, Email: o.CustomerEmail, Phone: o.CustomerPhone},
 		Notes:           o.Notes,

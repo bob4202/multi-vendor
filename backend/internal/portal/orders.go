@@ -56,6 +56,7 @@ var transitions = map[string][]transition{
 		{to: StatusCompleted, onlyFor: "collection"},
 		{to: StatusNoShow, onlyFor: "collection"},
 		{to: StatusOutForDelivery, onlyFor: "delivery"},
+		{to: StatusCancelled},
 	},
 	StatusOutForDelivery: {
 		{to: StatusCompleted},
@@ -109,7 +110,8 @@ var (
 	ErrCollectionCodeLocked = errors.New("too many wrong codes - hand over with a reason instead (e.g. checked ID)")
 	// ErrPaymentNotTaken: the capture failed, so the order can't be handed
 	// over (409).
-	ErrPaymentNotTaken = errors.New("the card couldn't be charged for this order - don't hand it over")
+	ErrPaymentNotTaken       = errors.New("the card couldn't be charged for this order - don't hand it over")
+	ErrCannotCancelThisOrder = errors.New("this order cannot be cancelled because the capture is not failed")
 )
 
 // maxCollectionCodeAttempts wrong codes lock code entry for that order.
@@ -117,16 +119,23 @@ const maxCollectionCodeAttempts = 5
 
 // NextStatusesFor is NextStatuses for a loaded order: "ready" is held back
 // while the customer still has to answer a substitution.
-func NextStatusesFor(o db.Order, awaitingCustomer bool) []string {
+func NextStatusesFor(o db.Order, awaitingCustomer bool, paymentStatus string) []string {
 	next := NextStatuses(o.Status, o.FulfilmentType)
-	if !awaitingCustomer {
-		return next
-	}
+
+	hideCancel := o.Status == StatusReady && paymentStatus != "capture_failed"
+	hideHandover := o.Status == StatusReady && paymentStatus == "capture_failed"
 	out := next[:0:0]
 	for _, s := range next {
-		if s != StatusReady {
-			out = append(out, s)
+		if s == StatusReady && awaitingCustomer {
+			continue
 		}
+		if hideCancel && s == StatusCancelled {
+			continue
+		}
+		if hideHandover && (s == StatusOutForDelivery || s == StatusCompleted) {
+			continue
+		}
+		out = append(out, s)
 	}
 	return out
 }
@@ -244,6 +253,19 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 			}
 			return db.Order{}, ErrCollectionCodeWrong
 		}
+	}
+	if in.NewStatus == StatusCancelled && current.Status == StatusReady {
+		// check if the payment status is capture_failed, if not do not allow the order to be cancelled
+		latestPayment, err := q.GetLatestPaymentForOrder(ctx, in.OrderID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return db.Order{}, fmt.Errorf("load latest payment: %w", err)
+		}
+		if latestPayment.Status == "capture_failed" {
+			// do the cancellation process
+		} else {
+			return db.Order{}, ErrCannotCancelThisOrder
+		}
+
 	}
 
 	var rejectionReason, note *string
