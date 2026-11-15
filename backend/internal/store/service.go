@@ -689,7 +689,7 @@ func QueueVoidIfHeld(ctx context.Context, q *db.Queries, orderID uuid.UUID, acto
 	if err != nil {
 		return fmt.Errorf("load payment: %w", err)
 	}
-	if payment.Status != "authorised" {
+	if payment.Status != "authorised" && payment.Status != "capture_failed" {
 		return nil
 	}
 	_, err = q.EnqueuePaymentJob(ctx, db.EnqueuePaymentJobParams{
