@@ -302,6 +302,16 @@ WHERE id = sqlc.arg(id)
   AND status = 'authorised'
 RETURNING *;
 
+-- name: MarkPaymentRetrying :one
+-- The shop asked to try the charge again: back to authorised so a new capture
+-- job can run, and so a second failure marks it capture_failed again.
+-- No rows = it isn't capture_failed (already retrying, or charged).
+UPDATE payments
+SET status = 'authorised', failure_code = NULL
+WHERE id = sqlc.arg(id)
+  AND status = 'capture_failed'
+RETURNING *;
+
 -- name: MarkPaymentVoided :one
 UPDATE payments
 SET status = 'voided', voided_at = coalesce(voided_at, now())

@@ -502,6 +502,39 @@ func (s *Server) handleVendorRefund(w http.ResponseWriter, r *http.Request) {
 	s.writeOrderDetail(w, r, http.StatusAccepted, row)
 }
 
+// POST /orders/{orderID}/payment/retry - ask the worker to try again to take the money.
+func (s *Server) handleVendorRetryCharge(w http.ResponseWriter, r *http.Request) {
+	orderID, err := uuid.Parse(chi.URLParam(r, "orderID"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
+
+	_, err = s.orders.QueueRetry(r.Context(), store.RetryPaymentInput{
+		BranchID:    vendorBranchID(r),
+		OrderID:     orderID,
+		ActorUserID: principalFromContext(r.Context()).User.ID,
+	})
+	switch {
+	case errors.Is(err, store.ErrOrderNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	case errors.Is(err, store.ErrNothingToRetry):
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	case err != nil:
+		s.internalError(w, r, err)
+		return
+	}
+
+	row, err := s.queries.GetVendorOrderByBranchAndID(r.Context(), db.GetVendorOrderByBranchAndIDParams{BranchID: vendorBranchID(r), ID: orderID})
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.writeOrderDetail(w, r, http.StatusAccepted, row)
+}
+
 // DELETE /orders/{orderID}/items/{itemID}/substitution - take back an
 // unanswered offer.
 func (s *Server) handleVendorWithdrawSubstitution(w http.ResponseWriter, r *http.Request) {
