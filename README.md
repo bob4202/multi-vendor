@@ -20,6 +20,8 @@ make help         # all targets: env, migrate, seed, admin, sqlc, typecheck, ...
 
 `make setup` creates `backend/.env` and `frontend/.env` from their `.env.example` files. It generates `APP_ENCRYPTION_KEY` and `ADMIN_API_KEY`, and points the local storefront at the demo Stratford branch (`BRANCH_ID`, `STOREFRONT_KEY`). It never overwrites a value you've already set, so it's safe to run again. Use `make env` to do just the `.env` part.
 
+**CI** (GitHub Actions) runs on every pull request: gofmt, generated sqlc code up to date, `go vet`, build, migrations and `go test -race` against Postgres, and the frontend typecheck. `make test` and `make typecheck` run the same tests locally (integration tests need `DATABASE_URL`).
+
 `make reset` deletes everything in the local database and seeds it again. It asks you to type the database name (`FORCE=1 make reset` skips that) and refuses any database that isn't on localhost. Branch IDs and keys change on a reset, so it updates `frontend/.env` too; restart `make dev` afterwards.
 
 ### Demo logins
@@ -58,7 +60,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 - Owners, managers and staff with their own logins and roles
 - Live order queue with accept countdown and new-order sound; status changes with full history
 - Collection hand-over by code, substitutions, automatic no-shows
-- Card payment status on each order, refunds (owners and managers), and a block on handing over an order whose card couldn't be charged
+- Card payment status on each order, refunds (owners and managers), and a block on handing over an order whose card couldn't be charged; the API can retry the charge or cancel the order
 - Store details, opening hours and closures; products with inventory sync status and "Sync now"
 
 **Platform admin** (`/admin`)
@@ -77,11 +79,13 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 
 - [`backend/docs/api.md`](backend/docs/api.md): API contracts (storefront, vendor, admin, webhooks)
 - [`backend/docs/payments-guide.md`](backend/docs/payments-guide.md): card payments plan and checklist
+- [`backend/docs/weighed-items-guide.md`](backend/docs/weighed-items-guide.md): selling by weight (butcher counter): plan and checklist
 - [`backend/docs/orders-guide.md`](backend/docs/orders-guide.md), [`backend/docs/featured-sorting-plan.md`](backend/docs/featured-sorting-plan.md): earlier build plans
 
 ## Roadmap
 
-- **Card payments:** what happens after a card can't be charged (pay again or cancel), early capture for far-off deliveries, then Stripe (see the payments guide)
+- **Card payments:** delivery bookable up to 5 days ahead, portal buttons to retry or cancel a failed charge (the API is done), then Stripe (see the payments guide)
+- **Weighed items:** products sold per kg and ordered by weight, weighed at the counter, scale receipt photos and a giveaway report for management (see the weighed items guide)
 - Vendors marking products as featured
 - User management: adding, removing and disabling staff, changing roles; password reset by email
 - Support for more inventory systems

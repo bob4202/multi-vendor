@@ -323,13 +323,13 @@ stateDiagram-v2
 | Shop cancels from `accepted` or `picking` | `cancelled`                                                     | Queue `void`                                                    | `voided`                          |
 | Shop marks `ready`                        | `ready`                                                         | Queue `capture` for the current `total` (after substitutions)   | `captured`                        |
 | Collected, or no-show                     | `completed` / `no_show`                                         | None: already captured; no refund on no-show per terms          | `captured`                        |
-| Cancel after `ready`                      | not allowed                                                     | None: the money is kept; any refund is the store's choice       | `captured`                        |
+| Cancel after `ready`                      | only after a failed charge (PAY-20)                             | After a failed charge: `void` what's left of the hold           | `voided`                          |
 | Vendor refunds part of an order           | unchanged                                                       | Queue `refund` (owner/manager only)                             | `partially_refunded` / `refunded` |
-| Capture fails (hold expired, card closed) | `ready` stays                                                   | Mark `capture_failed`; handover blocked, vendor sees a warning  | `capture_failed`                  |
+| Capture fails (hold expired, card closed) | `ready` stays                                                   | Mark `capture_failed`; handover blocked; retry or cancel        | `capture_failed`                  |
 
 Two things to handle on purpose:
 
-- **Holds expire.** A Stripe card hold lasts about 7 days. Collection is same-day, so that's fine. Delivery can be booked up to ~14 days ahead, so for a delivery more than 5 days away, **capture when the shop accepts** and refund any substitution difference at `ready`. Alternative: only allow card payment for deliveries within 5 days.
+- **Holds expire.** A Stripe card hold lasts about 7 days. Collection is same-day, so that's fine. Decided 2026-11-11: delivery can only be booked up to **5 days ahead** (PAY-22), so the money is always taken at `ready` while the hold is still there. If a capture fails anyway, the shop can try again or cancel (PAY-20).
 - **Webhook before the customer returns, or never.** The order page polls/streams `GET /orders/{id}`, so it shows "Confirming payment" until the webhook flips the order to `pending`. Add a small reconcile job: for `created` payments older than 10 minutes, ask the provider for the session status, in case a webhook was lost.
 
 The vendor's `transitions` map stays as it is. `awaiting_payment` is not in it, because only the payment service moves an order out of that status. Hide `awaiting_payment` orders from the vendor queue and the vendor SSE feed. In "My orders", show them as "Payment not finished" with a link back to the order.
@@ -551,10 +551,13 @@ Work top to bottom. Each phase ends with something you can test, and the `fake` 
 
 - [x] B11 `payment_jobs` worker (claim with `SKIP LOCKED`, backoff, `last_error`), started next to the outbox worker
 - [x] B12 Hook `ChangeOrderStatus`, `RejectOrder`, `ExpireOverdue`: queue `capture` at `ready` and `void` on reject/cancel/accept timeout, in the same transaction as the status change. No automatic refund on cancel after `ready`
-- [ ] B13 Early capture for deliveries more than `PAYMENT_CAPTURE_EARLY_DAYS` away (capture at accept, refund the difference at `ready`)
+- [x] ~~B13 Early capture for far-off deliveries~~ dropped (2026-11-11): delivery is limited to 5 days ahead instead (PAY-22)
 - [x] B14 `capture_failed` handling and the vendor warning flag
 - [x] B15 `POST …/orders/{orderId}/refunds` (owner, manager), with history entry
 - [x] F4 Vendor payment card and badges, `capture_failed` warning, `RefundDialog`, history lines. List badges light up once the list sends `payment` (PAY-21)
+- [x] B15b After a failed charge: `POST …/payment/retry`, and `ready → cancelled` with a void (PAY-20)
+- [ ] F4b Portal buttons "Try charging again" and "Cancel order" on a failed charge (F8)
+- [ ] B13b Delivery bookable at most 5 days ahead (PAY-22)
 - [ ] F5 Price breakdown: held, charged, refunded
 
 ### Phase 4: Stripe
@@ -591,7 +594,7 @@ These change the build, so they're worth settling before phase 1.
 - [ ] **Test keys in production:** refuse them, or allow them for demo vendors only.
 - [x] **Keep "pay in store"?** Decided 2026-10-21: no. Online orders are paid online, by card only. There's no `payment_method` column; orders placed before payments have no `payments` row.
 - [x] **Vendors without their own Stripe/Dojo (later):** the platform will offer its own account for a higher monthly subscription. Fits as another kind of `vendor_payment_accounts` row (e.g. `managed_by = 'platform'` plus the provider's connected-account id, with `secret_key_enc` nullable for those rows), added in a later migration. Payments point at the account row, so orders, jobs and webhooks don't change.
-- [ ] **Deliveries far ahead:** capture at accept (recommended), or only offer card for deliveries within 5 days.
+- [x] **Deliveries far ahead:** decided 2026-11-11: delivery can only be booked up to 5 days ahead (PAY-22), so no early capture.
 - [ ] **Payment window:** 30 minutes to finish paying before the order is dropped. Shorter is fine for same-day collection.
 - [ ] **Who can refund:** owner and manager only (assumed), or staff too.
 - [ ] **Card fees on refunds and no-shows:** Stripe keeps its fee on a refund. Is that the shop's cost, and do the terms need to say so?
