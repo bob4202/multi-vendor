@@ -47,8 +47,13 @@ func isOpenOn(date time.Time, hours []db.BranchOpeningHour, exceptions []db.Bran
 	return false
 }
 
-// isDateAllowed reports whether date is a valid order date: not before today
-// and at most 14 days ahead, both measured in date's timezone - so date must
+// maxDeliveryDaysAhead: a card hold lasts about 7 days and the money is taken
+// at ready, so delivery can be booked at most this many days after today
+// (today + 5 inclusive), leaving about 2 days of margin. PAY-22.
+const maxDeliveryDaysAhead = 5
+
+// isDateAllowed reports whether date is a valid delivery date: not before
+// today and at most maxDeliveryDaysAhead days ahead, both measured in date's timezone - so date must
 // already be in the branch's timezone. now is passed in rather than read from
 // the clock so tests can control it.
 func isDateAllowed(date, now time.Time) bool {
@@ -61,7 +66,7 @@ func isDateAllowed(date, now time.Time) bool {
 		return false
 	}
 
-	latest := today.AddDate(0, 0, 14)
+	latest := today.AddDate(0, 0, maxDeliveryDaysAhead)
 	return !requested.After(latest)
 }
 

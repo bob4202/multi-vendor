@@ -17,12 +17,16 @@ function todayIn(timezone: string) {
   )
 }
 
+// Display copy of the backend's maxDeliveryDaysAhead: delivery can be booked
+// for today through today + 5 (a card hold only lasts about 7 days).
+export const MAX_DELIVERY_DAYS_AHEAD = 5
+
 // The next `count` days the shop is open, starting today (branch time).
 // A closure for a date wins over the weekly hours, as on the backend.
 export function upcomingOpenDays(
   branch: BranchInfo,
   count = 7,
-  maxDaysAhead = 14
+  maxDaysAhead = MAX_DELIVERY_DAYS_AHEAD
 ): OrderDay[] {
   const openWeekdays = new Set(branch.opening_hours.map((h) => h.day))
   const closures = new Map(branch.closures.map((c) => [c.date, c]))

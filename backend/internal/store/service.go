@@ -344,7 +344,7 @@ func (s *Service) checkDate(ctx context.Context, branchID uuid.UUID, timezone, d
 	if !isDateAllowed(date, s.now()) {
 		return &Problem{
 			Code: "invalid_date", Field: "fulfillment_date",
-			Message: "Choose a date between today and two weeks from now.",
+			Message: fmt.Sprintf("Choose a delivery day within the next %d days.", maxDeliveryDaysAhead),
 		}, nil
 	}
 
