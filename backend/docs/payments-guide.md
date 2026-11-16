@@ -556,7 +556,7 @@ Work top to bottom. Each phase ends with something you can test, and the `fake` 
 - [x] B15 `POST …/orders/{orderId}/refunds` (owner, manager), with history entry
 - [x] F4 Vendor payment card and badges, `capture_failed` warning, `RefundDialog`, history lines. List badges light up once the list sends `payment` (PAY-21)
 - [x] B15b After a failed charge: `POST …/payment/retry`, and `ready → cancelled` with a void (PAY-20)
-- [ ] F4b Portal buttons "Try charging again" and "Cancel order" on a failed charge (F8)
+- [x] F4b Portal buttons "Try charging again" and "Cancel order" on a failed charge (F8)
 - [ ] B13b Delivery bookable at most 5 days ahead (PAY-22)
 - [ ] F5 Price breakdown: held, charged, refunded
 

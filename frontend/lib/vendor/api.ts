@@ -164,6 +164,17 @@ export const vendorAPI = {
       { method: "POST", body }
     ),
 
+  // After a failed charge: queue the capture again (202). 409 when there's
+  // no failed charge any more (someone already retried, or it was cancelled).
+  retryCharge: (branchId: string, orderId: string) =>
+    vendorFetch<OrderDetail>(
+      branchPath(
+        branchId,
+        `/orders/${encodeURIComponent(orderId)}/payment/retry`
+      ),
+      { method: "POST" }
+    ),
+
   getStoreInfo: (branchId: string) =>
     vendorFetch<StoreInfo & { name: string }>(branchPath(branchId, "/info")),
 

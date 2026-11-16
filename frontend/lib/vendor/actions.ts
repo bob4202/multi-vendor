@@ -143,10 +143,17 @@ export async function refundOrderAction(
   })
 }
 
+export async function retryChargeAction(branchId: string, orderId: string) {
+  return runAction(async () => {
+    await vendorAPI.retryCharge(branchId, orderId)
+  })
+}
+
 // Product search for the substitute picker (first page of matches).
 export async function searchProductsAction(branchId: string, search: string) {
   return runAction(
-    async () => (await vendorAPI.listProducts(branchId, { search, page: 1 })).data,
+    async () =>
+      (await vendorAPI.listProducts(branchId, { search, page: 1 })).data,
     { refresh: false }
   )
 }

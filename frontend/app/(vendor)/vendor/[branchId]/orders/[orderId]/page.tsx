@@ -17,6 +17,7 @@ import { OrderStatusActions } from "@/components/vendor/order-status-actions"
 import { OrderStatusBadge } from "@/components/vendor/order-status-badge"
 import { OrderTimeline } from "@/components/vendor/order-timeline"
 import { PaymentCard } from "@/components/vendor/payment-card"
+import { RetryChargeButton } from "@/components/vendor/retry-charge-button"
 import { PageHeader } from "@/components/common/page-header"
 import { formatDateTime } from "@/lib/format"
 import { vendorAPI } from "@/lib/vendor/api"
@@ -64,14 +65,9 @@ export default async function OrderPage({ params, searchParams }: Props) {
     )
   }
 
-  // The card couldn't be charged: hide the handover steps (the API refuses
-  // them too). Ending the order, e.g. as a no-show, still works.
+  // The card couldn't be charged. The API already drops the handover steps
+  // from next_statuses and offers "Cancel order" instead.
   const blocked = handoverBlocked(order.payment)
-  const nextStatuses = blocked
-    ? order.next_statuses.filter(
-        (s) => s !== "completed" && s !== "out_for_delivery"
-      )
-    : order.next_statuses
   // Owners and managers. Until /me sends refund_orders, fall back to the
   // role; the API enforces it either way.
   const canRefund =
@@ -107,7 +103,7 @@ export default async function OrderPage({ params, searchParams }: Props) {
               orderId={order.id}
               reference={order.reference}
               status={order.status}
-              nextStatuses={nextStatuses}
+              nextStatuses={order.next_statuses}
               requiresCollectionCode={order.requires_collection_code}
               initialCode={code && /^\d{6}$/.test(code) ? code : undefined}
             />
@@ -115,7 +111,20 @@ export default async function OrderPage({ params, searchParams }: Props) {
         }
       />
 
-      {blocked && <CaptureFailedAlert amount={order.total} />}
+      {blocked && (
+        <CaptureFailedAlert
+          amount={order.total}
+          action={
+            session.permissions.update_order_status && (
+              <RetryChargeButton
+                branchId={branchId}
+                orderId={order.id}
+                reference={order.reference}
+              />
+            )
+          }
+        />
+      )}
 
       {order.awaiting_customer && (
         <div className="mb-4 flex animate-in items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm fade-in-0">
