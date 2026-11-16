@@ -60,7 +60,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 - Owners, managers and staff with their own logins and roles
 - Live order queue with accept countdown and new-order sound; status changes with full history
 - Collection hand-over by code, substitutions, automatic no-shows
-- Card payment status on each order, refunds (owners and managers), and a block on handing over an order whose card couldn't be charged; the API can retry the charge or cancel the order
+- Card payment status on each order, refunds (owners and managers), and a block on handing over an order whose card couldn't be charged, with "Try charging again" and "Cancel order" on it
 - Store details, opening hours and closures; products with inventory sync status and "Sync now"
 
 **Platform admin** (`/admin`)
@@ -84,7 +84,7 @@ The seed also prints a one-time invite link for `manager.leeds@leeds.example`, t
 
 ## Roadmap
 
-- **Card payments:** delivery bookable up to 5 days ahead, portal buttons to retry or cancel a failed charge (the API is done), then Stripe (see the payments guide)
+- **Card payments:** Stripe next (see the payments guide). Done: delivery bookable up to 5 days ahead, retry or cancel a failed charge from the portal
 - **Weighed items:** products sold per kg and ordered by weight, weighed at the counter, scale receipt photos and a giveaway report for management (see the weighed items guide)
 - Vendors marking products as featured
 - User management: adding, removing and disabling staff, changing roles; password reset by email
