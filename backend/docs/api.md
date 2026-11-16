@@ -35,7 +35,7 @@ GET /v1/store/branch
   "closures": [{ "date": "2026-12-25", "closed": true, "open": null, "close": null, "note": "Christmas Day" }]
 }
 ```
-`day` is ISO (1 = Monday … 7 = Sunday); a day with no entries is closed. Send `closures` for roughly the next 14 days. `free_over` is `null` when there's no free-delivery threshold.
+`day` is ISO (1 = Monday … 7 = Sunday); a day with no entries is closed. Send `closures` for at least the next 6 days (today through today + 5, the delivery booking window). `free_over` is `null` when there's no free-delivery threshold.
 
 Schema done: migration `0006_branch_info.sql` adds `branch_info`, `branch_opening_hours` and `branch_hours_exception`; queries are in `queries/branch_info.sql`, and the seed fills in both demo branches.
 
@@ -73,6 +73,7 @@ Idempotency-Key: <uuid>
 ```
 - **201:** `{ "id", "reference": "TH-10234", "status": "pending", "items": [...], "subtotal", "delivery_fee", "total", "created_at" }`
 - **422:** `{ "error": "...", "issues": [{ "product_id": "...", "code": "unavailable" | "price_changed" | "below_min_order" | "outside_delivery_area" }] }`
+- **422** on `fulfillment_date` (code `invalid_date`): delivery in the past, or more than 5 days after today in the branch's timezone ("Choose a delivery day within the next 5 days."). Today through today + 5 is allowed if the shop is open. A card hold only lasts about 7 days and the money is taken at `ready`, hence the limit.
 
 Rules:
 - **Never trust prices from the client.** Read `branch_products.price1` for the key's branch, inside a transaction.

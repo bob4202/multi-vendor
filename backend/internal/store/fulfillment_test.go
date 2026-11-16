@@ -221,8 +221,8 @@ func TestIsDateAllowed(t *testing.T) {
 		{"yesterday", day(4), now, false},
 		{"today", day(5), now, true},
 		{"tomorrow", day(6), now, true},
-		{"day 14", day(19), now, true},
-		{"day 15", day(20), now, false},
+		{"day 5, last day allowed", day(10), now, true},
+		{"day 6, too far ahead", day(11), now, false},
 		// 23:30 UTC on 5 Oct is already 00:30 on 6 Oct in London (BST), so
 		// "today" for the branch is the 6th - ordering for the 5th must fail.
 		{"server clock still on previous day", day(5), time.Date(2026, 10, 5, 23, 30, 0, 0, time.UTC), false},

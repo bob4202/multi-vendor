@@ -133,7 +133,7 @@ These are plain functions with **no database and no HTTP**, so you can unit-test
    - Test the boundary: is "free over £50" ≥ or >? Pick one, write it in a comment, and test exactly £50.
 3. **Is the branch open on a date?** Given weekly hours, exceptions and a date: an exception for that date wins; otherwise any weekly row for that ISO weekday means open.
    - Tests: a normal Monday, a Sunday with no rows, Christmas closed, an exception with special hours on a normally-closed day.
-4. **Is the date allowed?** Not in the past and at most 14 days ahead, both measured **in the branch's timezone**.
+4. **Is the date allowed?** Not in the past and at most 5 days ahead (was 14 until PAY-22, see `maxDeliveryDaysAhead`), both measured **in the branch's timezone**.
    - Why does the timezone matter for an order placed at 23:30 UTC in summer?
    - Make "now" an argument rather than calling `time.Now()` inside, so tests control it.
 
