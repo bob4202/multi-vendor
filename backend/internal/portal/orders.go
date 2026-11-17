@@ -126,17 +126,12 @@ const maxCollectionCodeAttempts = 5
 func NextStatusesFor(o db.Order, awaitingCustomer bool, paymentStatus string) []string {
 	next := NextStatuses(o.Status, o.FulfilmentType)
 
-	hideCancel := o.Status == StatusReady && paymentStatus != "capture_failed"
-	hideHandover := o.Status == StatusReady && paymentStatus == "capture_failed"
 	out := next[:0:0]
 	for _, s := range next {
 		if s == StatusReady && awaitingCustomer {
 			continue
 		}
-		if hideCancel && s == StatusCancelled {
-			continue
-		}
-		if hideHandover && (s == StatusOutForDelivery || s == StatusCompleted) {
+		if paymentRuleError(o, s, paymentStatus) != nil {
 			continue
 		}
 		out = append(out, s)
@@ -191,16 +186,15 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 		return db.Order{}, ErrAcceptWindowClosed
 	}
 
-	// Don't let unpaid shopping leave the shop. No payment row (orders from
-	// before card payments) is fine.
-	if in.NewStatus == StatusCompleted || in.NewStatus == StatusOutForDelivery {
-		latestPayment, err := q.GetLatestPaymentForOrder(ctx, in.OrderID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return db.Order{}, fmt.Errorf("load latest payment: %w", err)
-		}
-		if err == nil && blocksHandover(in.NewStatus, latestPayment.Status) {
-			return db.Order{}, ErrPaymentNotTaken
-		}
+	// The payment rule (no handover after a failed charge; a ready order can
+	// only be cancelled after one) lives in paymentRuleError, shared with the
+	// buttons. No payment row (older orders) gives "", which is fine.
+	latestPayment, err := q.GetLatestPaymentForOrder(ctx, in.OrderID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.Order{}, fmt.Errorf("load latest payment: %w", err)
+	}
+	if err = paymentRuleError(current, in.NewStatus, latestPayment.Status); err != nil {
+		return db.Order{}, err
 	}
 
 	params := db.TransitionOrderStatusParams{
@@ -256,17 +250,6 @@ func (s *Service) ChangeOrderStatus(ctx context.Context, in ChangeStatusInput) (
 				return db.Order{}, fmt.Errorf("record code attempt: %w", err)
 			}
 			return db.Order{}, ErrCollectionCodeWrong
-		}
-	}
-	// A ready order can only be cancelled after its charge failed. No
-	// payment row (an order from before card payments) can't be either.
-	if in.NewStatus == StatusCancelled && current.Status == StatusReady {
-		latestPayment, err := q.GetLatestPaymentForOrder(ctx, in.OrderID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return db.Order{}, fmt.Errorf("load latest payment: %w", err)
-		}
-		if latestPayment.Status != "capture_failed" {
-			return db.Order{}, ErrCannotCancelThisOrder
 		}
 	}
 
@@ -355,4 +338,20 @@ func acceptWindowClosed(o db.Order, newStatus string, now time.Time) bool {
 func blocksHandover(newStatus, paymentStatus string) bool {
 	handover := newStatus == StatusCompleted || newStatus == StatusOutForDelivery
 	return handover && paymentStatus == "capture_failed"
+}
+
+// paymentRuleError: why newStatus isn't allowed for this order because of
+// its payment, or nil if the payment doesn't stop it.
+func paymentRuleError(current db.Order, newStatus, paymentStatus string) error {
+	if blocksHandover(newStatus, paymentStatus) {
+		return ErrPaymentNotTaken
+	}
+
+	if current.Status == StatusReady && newStatus == StatusCancelled {
+		if paymentStatus != "capture_failed" {
+			return ErrCannotCancelThisOrder
+		}
+	}
+
+	return nil
 }

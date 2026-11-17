@@ -56,3 +56,28 @@ func TestBlocksHandover(t *testing.T) {
 		}
 	}
 }
+
+func TestPaymentRuleError(t *testing.T) {
+	tests := []struct {
+		name                     string
+		current                  string // the order's status now
+		newStatus, paymentStatus string
+		want                     error
+	}{
+		{"hand over a paid order", StatusReady, StatusCompleted, "captured", nil},
+		{"hand over after a failed charge", StatusReady, StatusCompleted, "capture_failed", ErrPaymentNotTaken},
+		{"send out for delivery after a failed charge", StatusReady, StatusOutForDelivery, "capture_failed", ErrPaymentNotTaken},
+		{"complete the out of delivery order with a failed charge", StatusOutForDelivery, StatusCompleted, "capture_failed", ErrPaymentNotTaken},
+		{"no show for a failed charge", StatusReady, StatusNoShow, "capture_failed", nil},
+		{"cancel a ready order for a failed charge", StatusReady, StatusCancelled, "capture_failed", nil},
+		{"cancel a ready order that was paid", StatusReady, StatusCancelled, "captured", ErrCannotCancelThisOrder},
+		{"cancel a ready order no payment", StatusReady, StatusCancelled, "", ErrCannotCancelThisOrder},
+		{"cancel a picking order", StatusPicking, StatusCancelled, "authorised", nil},
+	}
+	for _, tt := range tests {
+		o := db.Order{Status: tt.current}
+		if got := paymentRuleError(o, tt.newStatus, tt.paymentStatus); got != tt.want {
+			t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
