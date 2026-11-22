@@ -3,7 +3,9 @@ package stripe
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	stripeapi "github.com/stripe/stripe-go/v87"
 
@@ -32,7 +34,52 @@ func New(c payment.Credentials) (payment.Provider, error) {
 func (s *Stripe) Name() string { return "stripe" }
 
 func (s *Stripe) CreateSession(ctx context.Context, in payment.SessionInput) (payment.Session, error) {
-	return payment.Session{}, errNotBuilt
+	// Stripe refuses expires_at under 30 minutes from now; 31 leaves a margin.
+	// Send our deadline, unless it's earlier than Stripe allows.
+	earliest := time.Now().Add(31 * time.Minute)
+	expiresAt := in.ExpiresAt
+	if expiresAt.Before(earliest) {
+		expiresAt = earliest
+	}
+
+	param := &stripeapi.CheckoutSessionCreateParams{
+		SuccessURL:    stripeapi.String(in.SuccessURL),
+		CancelURL:     stripeapi.String(in.CancelURL),
+		CustomerEmail: stripeapi.String(in.Email),
+
+		PaymentIntentData: &stripeapi.CheckoutSessionCreatePaymentIntentDataParams{
+			CaptureMethod: stripeapi.String(stripeapi.PaymentIntentCaptureMethodManual),
+			Metadata: map[string]string{
+				"payment_id": in.PaymentID.String(),
+			},
+		},
+		Mode: stripeapi.String(stripeapi.CheckoutSessionModePayment),
+		LineItems: []*stripeapi.CheckoutSessionCreateLineItemParams{
+			{
+				PriceData: &stripeapi.CheckoutSessionCreateLineItemPriceDataParams{
+					Currency:   stripeapi.String(in.Currency),
+					UnitAmount: stripeapi.Int64(in.Amount),
+					ProductData: &stripeapi.CheckoutSessionCreateLineItemPriceDataProductDataParams{
+						Name: stripeapi.String(in.Reference),
+					},
+				},
+				Quantity: stripeapi.Int64(1),
+			},
+		},
+		ExpiresAt: stripeapi.Int64(expiresAt.Unix()),
+	}
+	param.SetIdempotencyKey(in.PaymentID.String())
+	param.AddMetadata("payment_id", in.PaymentID.String())
+
+	result, err := s.client.V1CheckoutSessions.Create(ctx, param)
+	if err != nil {
+		return payment.Session{}, fmt.Errorf("stripe: create checkout session: %w", err)
+	}
+
+	return payment.Session{
+		ProviderRef: result.ID,
+		RedirectURL: result.URL,
+	}, nil
 }
 
 func (s *Stripe) Capture(ctx context.Context, ref string, amount int64, idemKey string) error {
