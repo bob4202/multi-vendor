@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	stripeapi "github.com/stripe/stripe-go/v87"
@@ -13,8 +12,6 @@ import (
 )
 
 var _ payment.Provider = (*Stripe)(nil)
-
-var errNotBuilt = errors.New("stripe not implemented yet")
 
 type Stripe struct {
 	client        *stripeapi.Client
@@ -118,8 +115,4 @@ func (s *Stripe) Refund(ctx context.Context, ref string, amount int64, idemKey s
 		return "", stripeError(opRefund, err)
 	}
 	return result.ID, nil
-}
-
-func (s *Stripe) ParseWebhook(r *http.Request, body []byte) (payment.Event, bool, error) {
-	return payment.Event{}, false, errNotBuilt
 }
