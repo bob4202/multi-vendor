@@ -61,7 +61,8 @@ func NextStatus(from PaymentKind, ev EventKind, amount Amounts) (PaymentKind, Ou
 	// Void Events
 	case EventVoided:
 		switch from {
-		case StatusAuthorised:
+		// capture_failed: since PAY-20 cancelling the order voids it.
+		case StatusAuthorised, StatusCaptureFailed:
 			return StatusVoided, Changed
 		case StatusVoided:
 			return StatusVoided, AlreadyDone

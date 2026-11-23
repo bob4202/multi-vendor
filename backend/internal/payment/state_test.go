@@ -38,6 +38,7 @@ func TestNextStatus(t *testing.T) {
 		{"shop marked ready", StatusAuthorised, EventCaptured, none, StatusCaptured, Changed},
 		{"shop rejected", StatusAuthorised, EventVoided, none, StatusVoided, Changed},
 		{"capture retry worked", StatusCaptureFailed, EventCaptured, none, StatusCaptured, Changed},
+		{"order cancelled after a failed charge", StatusCaptureFailed, EventVoided, none, StatusVoided, Changed},
 
 		// Refunds depend on the amounts.
 		{"part refund", StatusCaptured, EventRefunded, Amounts{Captured: 2450, Refunded: 500}, StatusPartiallyRefunded, Changed},
