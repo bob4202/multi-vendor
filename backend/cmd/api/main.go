@@ -32,6 +32,7 @@ import (
 	"ecommerce/backend/internal/notify"
 	"ecommerce/backend/internal/payment"
 	"ecommerce/backend/internal/payment/fake"
+	"ecommerce/backend/internal/payment/stripe"
 	"ecommerce/backend/internal/platform"
 	"ecommerce/backend/internal/portal"
 	"ecommerce/backend/internal/push"
@@ -154,7 +155,8 @@ func run(logger *slog.Logger) error {
 // knownProviders are the payment adapters compiled into this binary.
 // PAYMENT_PROVIDERS picks which of them this server actually offers.
 var knownProviders = payment.Registry{
-	"fake": fake.New,
+	"fake":   fake.New,
+	"stripe": stripe.New,
 }
 
 // buildPaymentRegistry keeps only the providers named in PAYMENT_PROVIDERS,
