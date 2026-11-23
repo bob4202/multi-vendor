@@ -89,7 +89,7 @@ func (s *Stripe) Capture(ctx context.Context, ref string, amount int64, idemKey 
 	param.SetIdempotencyKey(idemKey)
 	_, err := s.client.V1PaymentIntents.Capture(ctx, ref, param)
 	if err != nil {
-		return fmt.Errorf("stripe: capture err : %w", err)
+		return stripeError(opCapture, err)
 	}
 	return nil
 }
@@ -98,8 +98,11 @@ func (s *Stripe) Void(ctx context.Context, ref string, idemKey string) error {
 	param := &stripeapi.PaymentIntentCancelParams{}
 	param.SetIdempotencyKey(idemKey)
 	_, err := s.client.V1PaymentIntents.Cancel(ctx, ref, param)
+	if alreadyCancelled(err) {
+		return nil // nothing left to release
+	}
 	if err != nil {
-		return fmt.Errorf("stripe: void err: %w", err)
+		return stripeError(opVoid, err)
 	}
 	return nil
 }
@@ -112,7 +115,7 @@ func (s *Stripe) Refund(ctx context.Context, ref string, amount int64, idemKey s
 	param.SetIdempotencyKey(idemKey)
 	result, err := s.client.V1Refunds.Create(ctx, param)
 	if err != nil {
-		return "", fmt.Errorf("stripe: refund err: %w", err)
+		return "", stripeError(opRefund, err)
 	}
 	return result.ID, nil
 }
