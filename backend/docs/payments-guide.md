@@ -436,31 +436,45 @@ No provider keys live in `.env`; they belong to each vendor.
 
 ## Stripe implementation
 
-Use **Stripe Checkout** (hosted page) with a manually captured PaymentIntent, via the official `github.com/stripe/stripe-go` library. Check the current major version and the event names against Stripe's docs when you start; the mapping below is the shape to aim for.
+Use **Stripe Checkout** (hosted page) with a manually captured PaymentIntent, via the official `github.com/stripe/stripe-go` library. Built in `internal/payment/stripe` (PAY-24) on stripe-go v87, with one client per call built from that vendor's key (never the global `stripe.Key`).
 
 ### Interface method to Stripe call
 
 | Our method      | Stripe call                                              | Key settings                                                                                                                                                                                                                                                                           |
 | --------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CreateSession` | Create Checkout Session                                  | `mode=payment`, one line item "Order TH-10234" for the total, `payment_intent_data.capture_method=manual`, `metadata.payment_id` on the session **and** `payment_intent_data.metadata`, `customer_email`, `expires_at` (Stripe allows 30 min to 24 h), idempotency key = `payments.id` |
-| `Capture`       | Capture PaymentIntent                                    | `amount_to_capture` = order total after substitutions; the rest is released automatically                                                                                                                                                                                              |
-| `Void`          | Cancel PaymentIntent                                     | Only while uncaptured                                                                                                                                                                                                                                                                  |
+| `CreateSession` | Create Checkout Session                                  | `mode=payment`, one line item "Order TH-10234" for the total, `payment_intent_data.capture_method=manual`, `metadata.payment_id` on the session **and** `payment_intent_data.metadata`, `customer_email`, `expires_at` = the later of `payment_deadline` and now + 31 min (Stripe refuses under 30 min; a payment after our deadline is voided by the webhook), idempotency key = `payments.id` |
+| `Capture`       | Capture PaymentIntent                                    | `amount_to_capture` = order total after substitutions; the rest is released automatically. Idempotency key = `payment_jobs.id`                                                                                                                                                         |
+| `Void`          | Cancel PaymentIntent                                     | Only while uncaptured. Already cancelled counts as done. Idempotency key = `payment_jobs.id`                                                                                                                                                                                            |
 | `Refund`        | Create Refund                                            | `payment_intent`, `amount`, idempotency key = `payment_jobs.id`                                                                                                                                                                                                                        |
-| `ParseWebhook`  | `webhook.ConstructEvent(body, Stripe-Signature, secret)` | Read the raw body before any JSON decoding                                                                                                                                                                                                                                             |
+| `ParseWebhook`  | `webhook.ConstructEventWithOptions(body, Stripe-Signature, secret, …)` | Read the raw body before any JSON decoding. `IgnoreAPIVersionMismatch: true`: a vendor's account may send an older API version, which plain `ConstructEvent` refuses |
 
 ### Webhook events to map
 
 | Stripe event                               | Our `EventKind`              | Notes                                                                |
 | ------------------------------------------ | ---------------------------- | -------------------------------------------------------------------- |
-| `checkout.session.completed`               | (store the PaymentIntent id) | Fills `payment_ref`; with manual capture the money is held, not paid |
-| `payment_intent.amount_capturable_updated` | `authorised`                 | The hold is in place: move the order to `pending`                    |
-| `payment_intent.payment_failed`            | `failed`                     |                                                                      |
+| `checkout.session.completed`               | (ignored)                    | The customer finished the page; the hold itself comes from the next event, which carries everything |
+| `payment_intent.amount_capturable_updated` | `authorised`                 | Only when `status = requires_capture` and `amount_capturable > 0`. Carries the PaymentIntent id (`payment_ref`) and the held amount |
+| `payment_intent.payment_failed`            | `failed`                     | The Checkout page stays open, so a later hold still applies (`MarkPaymentAuthorised` accepts `failed`) |
 | `checkout.session.expired`                 | `expired`                    |                                                                      |
 | `payment_intent.canceled`                  | `voided`                     | Confirms our void, or Stripe dropping an expired hold                |
 | `payment_intent.succeeded`                 | `captured`                   | Confirms our capture                                                 |
-| `charge.refunded`                          | `refunded`                   | Amount comes from the charge                                         |
+| `charge.refunded`                          | `refunded`                   | `amount_refunded`: the running total. The charge carries a copy of the PaymentIntent's metadata |
 
-Everything else returns 200 and is ignored. Use one line item for the whole order, not one per product: the amount is what matters, and substitutions change lines after payment anyway.
+`payment_id` comes from the object's metadata. Everything else returns 200 and is ignored, including events with no `payment_id` of ours (payments the shop takes some other way on the same Stripe account). Use one line item for the whole order, not one per product: the amount is what matters, and substitutions change lines after payment anyway.
+
+### Errors the worker must not retry
+
+Stripe errors that can never succeed become `payment`'s errors, so the jobs worker gives up straight away; everything else (network, rate limits, Stripe down) is retried. The mapping is per call (`internal/payment/stripe/errors.go`), because the same code means different things:
+
+| Call    | Stripe says                                                                                     | Our error            |
+| ------- | ----------------------------------------------------------------------------------------------- | -------------------- |
+| Capture | `charge_already_captured`, or `payment_intent_unexpected_state` with the intent `succeeded`     | `ErrAlreadyCaptured` |
+| Capture | `charge_expired_for_capture`, `amount_too_large`, `resource_missing`, other unexpected states   | `ErrNotCapturable`   |
+| Void    | `payment_intent_unexpected_state`: `canceled` → done (nil), `succeeded` → `ErrAlreadyCaptured`  |                      |
+| Refund  | `amount_too_large`, or **no code** with `param = amount`                                        | `ErrRefundTooLarge`  |
+| Refund  | `charge_already_refunded`, disputed, unexpected state, `resource_missing`, **no code** (uncaptured) | `ErrNotRefundable` |
+
+Checked in test mode: two refund errors arrive with no code at all, so the docs' code list isn't enough. Error text keeps only Stripe's code and message: Stripe's own `Error()` is the whole JSON response, client secret included.
 
 ### Handling a webhook
 
@@ -562,7 +576,7 @@ Work top to bottom. Each phase ends with something you can test, and the `fake` 
 
 ### Phase 4: Stripe
 
-- [ ] B16 `internal/payment/stripe` adapter with a client per vendor key (table in "Stripe implementation")
+- [x] B16 `internal/payment/stripe` adapter with a client per vendor key (table in "Stripe implementation")
 - [ ] B17 Stripe `Connector`: verify key, register and delete webhook
 - [ ] B18 `GET/PUT/DELETE /v1/vendor/payments`, `ManagePayments` permission for owners, key encryption with `crypto.SecretBox`
 - [ ] B19 Mark an account `invalid` on auth errors; hide card at checkout while it is
